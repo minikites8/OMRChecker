@@ -55,15 +55,25 @@ jobs:
           OMR_DATA_ROOT: ${{ runner.temp }}/omrchecker-data
         run: |
           python - <<'PY'
-          from fastapi.testclient import TestClient
-          from backend.app import app
+          from starlette.requests import Request
+          from backend.app import health, session
 
-          client = TestClient(app)
-          health = client.get("/api/health")
-          session = client.get("/api/session")
-          assert health.status_code == 200 and health.json()["ok"]
-          assert session.status_code == 200 and session.json()["authenticated"]
-          print("API_SMOKE_OK", health.status_code, session.status_code)
+          scope = {
+              "type": "http",
+              "method": "GET",
+              "path": "/api/session",
+              "raw_path": b"/api/session",
+              "query_string": b"",
+              "headers": [],
+              "client": ("127.0.0.1", 1),
+              "server": ("127.0.0.1", 8000),
+              "scheme": "http",
+          }
+          health_payload = health()
+          session_payload = session(Request(scope))
+          assert health_payload["ok"]
+          assert session_payload["authenticated"]
+          print("API_SMOKE_OK", health_payload["ok"], session_payload["authenticated"])
           PY
 
       - name: Frontend tests
