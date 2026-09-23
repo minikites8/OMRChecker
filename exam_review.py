@@ -205,6 +205,112 @@ def _split_correction_answer(value):
     return None, ""
 
 
+def _split_correction_options(value):
+    """拆分改错题参考答案的多个等价写法。"""
+    return [part.strip() for part in re.split(r"\s*(?:或|或者|\bor\b)\s*", str(value or ""), flags=re.IGNORECASE) if part.strip()]
+
+
+def _source_code_lines(source_content):
+    """提取题干中的代码行，优先使用题干已有的行号。"""
+    text = unicodedata.normalize("NFKC", str(source_content or "")).replace("\r\n", "\n").replace("\r", "\n")
+    explicit = []
+    for raw in text.split("\n"):
+        line = raw.strip()
+        match = re.match(r"^(\d{1,3})\s+(?![.、])(.+?)\s*$", line)
+        if match:
+            explicit.append((int(match.group(1)), match.group(2).strip()))
+    if len(explicit) >= 2:
+        return explicit
+
+    lines = []
+    started = False
+    code_start = re.compile(
+        r"^(?:#\s*(?:include|define)|(?:class|struct|namespace|template)\b|"
+        r"(?:const\s+)?(?:void|bool|char|short|long|float|double|int|unsigned|signed)\b|"
+        r"[A-Za-z_]\w*\s*\([^)]*\)\s*\{?)"
+    )
+    for raw in text.split("\n"):
+        line = raw.strip()
+        if not started:
+            if not line or not code_start.match(line):
+                continue
+            started = True
+        if line:
+            lines.append((len(lines) + 1, line))
+    return lines
+
+
+def _line_match_score(expected, candidate):
+    expected_text = _normalize(expected).lower()
+    candidate_text = _normalize(candidate).lower()
+    if not expected_text or not candidate_text:
+        return 0.0
+    char_score = difflib.SequenceMatcher(None, expected_text, candidate_text).ratio()
+    expected_tokens = _code_tokens(expected)
+    candidate_tokens = _code_tokens(candidate)
+    token_score = difflib.SequenceMatcher(None, expected_tokens, candidate_tokens).ratio() if expected_tokens and candidate_tokens else 0.0
+    shared_identifiers = set(re.findall(r"[a-z_]\w*", expected_text)) & set(re.findall(r"[a-z_]\w*", candidate_text))
+    identifier_bonus = min(0.12, 0.03 * len(shared_identifiers))
+    return min(1.0, 0.62 * char_score + 0.38 * token_score + identifier_bonus)
+
+
+def _infer_correction_line(expected, source_content):
+    """从题干代码中推导未标注行号的改错参考答案。"""
+    line, content = _split_correction_answer(expected)
+    if line is not None and content:
+        return line
+    if not content:
+        content = str(expected or "").strip()
+    source_lines = _source_code_lines(source_content)
+    if not source_lines:
+        return None
+    options = _split_correction_options(content) or [content]
+    ranked = []
+    for source_line, source_text in source_lines:
+        score = max(_line_match_score(option, source_text) for option in options)
+        ranked.append((score, source_line))
+    ranked.sort(reverse=True)
+    if not ranked or ranked[0][0] < 0.45:
+        return None
+    if len(ranked) > 1 and ranked[0][0] - ranked[1][0] < 0.025 and ranked[0][0] < 0.78:
+        return None
+    return ranked[0][1]
+
+
+def _normalize_correction_expected(question, expected, source_content=""):
+    """为改错参考答案补齐行号，保留原答案文本和等价写法。"""
+    if not _is_correction_question(question):
+        return expected
+    line, content = _split_correction_answer(expected)
+    if line is not None and content:
+        return expected
+    inferred_line = _infer_correction_line(expected, source_content)
+    if inferred_line is None:
+        return expected
+    return "{}. {}".format(inferred_line, str(expected or "").strip())
+
+
+def _judge_answer_content(expected, recognized, confidence):
+    expected_forms = _answer_forms(expected)
+    recognized_forms = _answer_forms(recognized)
+    expected_operators = _critical_operators(expected)
+    recognized_operators = _critical_operators(recognized)
+    operators_match = expected_operators == recognized_operators
+    contains = any(left in right for left in expected_forms for right in recognized_forms)
+    similarity = _similarity(expected, recognized)
+    code_answer = _looks_like_code(expected)
+    code_tokens_match = _code_tokens(expected) == _code_tokens(recognized)
+    if confidence < 0.65:
+        return "需人工复核", "OCR置信度低于0.65"
+    if code_answer and not code_tokens_match:
+        return "不通过", "代码变量、下标、数值或运算符与参考答案不一致"
+    if operators_match and (contains or similarity >= 0.90):
+        return "自动通过", f"答案相似度{similarity:.2f}"
+    if not operators_match:
+        return "不通过" if code_answer else "需人工复核", "关键运算符与参考答案不一致"
+    return "需人工复核", f"答案相似度{similarity:.2f}"
+
+
 def judge_answer(expected, recognized, confidence, question=None):
     expected_norm = _normalize(expected)
     recognized_norm = _normalize(recognized)
@@ -226,28 +332,13 @@ def judge_answer(expected, recognized, confidence, question=None):
             return "不通过", "改错题行号错误：应为第{}行，识别为第{}行".format(expected_line, recognized_line)
         if not recognized_content:
             return "不通过", "改错题缺少改错内容"
-        expected = expected_content
-        recognized = recognized_content
-        expected_norm = _normalize(expected)
-        recognized_norm = _normalize(recognized)
-    expected_forms = _answer_forms(expected)
-    recognized_forms = _answer_forms(recognized)
-    expected_operators = _critical_operators(expected)
-    recognized_operators = _critical_operators(recognized)
-    operators_match = expected_operators == recognized_operators
-    contains = any(left in right for left in expected_forms for right in recognized_forms)
-    similarity = _similarity(expected, recognized)
-    code_answer = _looks_like_code(expected)
-    code_tokens_match = _code_tokens(expected) == _code_tokens(recognized)
-    if confidence < 0.65:
-        return "需人工复核", "OCR置信度低于0.65"
-    if code_answer and not code_tokens_match:
-        return "不通过", "代码变量、下标、数值或运算符与参考答案不一致"
-    if operators_match and (contains or similarity >= 0.90):
-        return "自动通过", f"答案相似度{similarity:.2f}"
-    if not operators_match:
-        return "不通过" if code_answer else "需人工复核", "关键运算符与参考答案不一致"
-    return "需人工复核", f"答案相似度{similarity:.2f}"
+        results = [_judge_answer_content(option, recognized_content, confidence) for option in _split_correction_options(expected_content)]
+        if any(status == "自动通过" for status, _reason in results):
+            return next(result for result in results if result[0] == "自动通过")
+        if results and all(status == "不通过" for status, _reason in results):
+            return results[0]
+        return next((result for result in results if result[0] == "需人工复核"), results[0] if results else ("需人工复核", "参考答案需要人工确认"))
+    return _judge_answer_content(expected, recognized, confidence)
 
 
 def _objective_expected(value):
@@ -1210,8 +1301,16 @@ def refresh_rule_judgments(review):
         if not any(key in item for key in ("expected_answer", "recognized_text", "auto_status")):
             continue
         eligible = True
-        status, reason = judge_answer(
+        normalized_expected = _normalize_correction_expected(
+            item.get("question"),
             item.get("expected_answer", ""),
+            item.get("source_content", ""),
+        )
+        if item.get("expected_answer", "") != normalized_expected:
+            item["expected_answer"] = normalized_expected
+            changed = True
+        status, reason = judge_answer(
+            normalized_expected,
             item.get("recognized_text", ""),
             item.get("confidence", 0.0),
             question=item.get("question"),
@@ -1248,9 +1347,15 @@ def apply_ai_review(review, progress_callback=None):
             item["ai_reason"] = ai_result["reason"]
             item["ai_corrected_answer"] = ai_result["corrected_answer"]
             if item["ai_status"] == "AI通过" and _is_correction_question(item.get("question")):
+                normalized_expected = _normalize_correction_expected(
+                    item.get("question"),
+                    item.get("expected_answer", ""),
+                    item.get("source_content", ""),
+                )
+                item["expected_answer"] = normalized_expected
                 visual_answer = item["ai_visual_text"] or item.get("recognized_text", "")
                 strict_status, strict_reason = judge_answer(
-                    item.get("expected_answer", ""), visual_answer,
+                    normalized_expected, visual_answer,
                     max(float(item.get("confidence", 0) or 0), float(item.get("ai_confidence", 0) or 0)),
                     question=item.get("question"),
                 )
@@ -1293,7 +1398,8 @@ def _build_review_from_maps(source_map, answers, source_meta, card_paths, image_
         field = card["text_fields"].get(question, {})
         recognized = field.get("text", "")
         confidence = field.get("confidence", 0.0)
-        expected = answers.get(question, "")
+        source_content = source_map.get(question, "")
+        expected = _normalize_correction_expected(question, answers.get(question, ""), source_content)
         status, reason = judge_answer(expected, recognized, confidence, question=question)
         number = int(question.split("(", 1)[0])
         region = "program" if number <= 45 else "correction" if number <= 60 else "material" if number <= 63 else None
@@ -1302,7 +1408,7 @@ def _build_review_from_maps(source_map, answers, source_meta, card_paths, image_
             status, reason = "需人工复核", "题号定位证据不足，请核对原扫描图"
         item = asdict(ReviewItem(
             question=question,
-            source_content=source_map.get(question, ""),
+            source_content=source_content,
             expected_answer=expected,
             recognized_text=recognized,
             confidence=confidence,
@@ -1458,9 +1564,15 @@ def apply_manual_review(review, decisions, objective_decisions=None):
             continue
         manual_status = str(decision.get("status") or "待复核")
         manual_text = str(decision.get("text") or "")
+        normalized_expected = _normalize_correction_expected(
+            item.get("question"),
+            item.get("expected_answer", ""),
+            item.get("source_content", ""),
+        )
+        item["expected_answer"] = normalized_expected
         if manual_status == "通过" and _is_correction_question(item.get("question")) and manual_text.strip():
             strict_status, strict_reason = judge_answer(
-                item.get("expected_answer", ""), manual_text, 1.0,
+                normalized_expected, manual_text, 1.0,
                 question=item.get("question"),
             )
             if strict_status != "自动通过":

@@ -408,6 +408,96 @@ def test_correction_questions_require_matching_line_number_and_content():
     assert judge_answer("return *max;", "return *max;", 0.99, question="31")[0] == "自动通过"
 
 
+def test_correction_reference_line_is_inferred_and_alternatives_are_accepted():
+    source = """46-48. 指针找最大值：修正 3 处错误
+1 int findMax(int *arr, int n)
+2 {
+3 int *max = arr[0];
+4 for (int i = 1; i < n; i++)
+5 {
+6 if (*(arr + i) > max)
+7 {
+8 max = arr + i;
+9 }
+10 }
+11 return max;
+12 }
+"""
+    expected = "int *max = arr; 或 int *max = &arr[0];"
+    normalized = exam_review._normalize_correction_expected("46", expected, source)
+    assert normalized.startswith("3. ")
+    assert judge_answer(normalized, "(3)int *max = arr;", 0.99, question="46")[0] == "自动通过"
+
+
+def test_correction_reference_lines_are_inferred_for_all_unnumbered_and_numbered_code():
+    numbered = """49-53. 斐波那契数列
+1 int fib(int n)
+2 {
+3 if (n == 1) return 0;
+4 if (n == 2) return 2;
+5 int a = 1, b = 1;
+6 for (int i = 3; i < n; i++)
+7 {
+8 int c = a - b;
+9 a = b;
+10 b = c;
+11 }
+12 return a;
+13 }
+"""
+    assert exam_review._normalize_correction_expected("49", "if (n == 1) return 1;", numbered).startswith("3. ")
+    assert exam_review._normalize_correction_expected("50", "if (n == 2) return 1;", numbered).startswith("4. ")
+    assert exam_review._normalize_correction_expected("51", "for (int i = 3; i <= n; i++)", numbered).startswith("6. ")
+    assert exam_review._normalize_correction_expected("52", "int c = a + b;", numbered).startswith("8. ")
+    assert exam_review._normalize_correction_expected("53", "return b;", numbered).startswith("12. ")
+
+    unnumbered = """59. 圆面积计算
+#include <stdio.h>
+#define PI 3.14159
+int main(){
+    int r;
+    scanf("%d", &r);
+    int area = PI * r * r;
+    printf("%.2lf\n", area);
+    return 0;
+}
+"""
+    assert exam_review._normalize_correction_expected("59", "double area = PI * r * r;", unnumbered).startswith("6. ")
+
+
+def test_refresh_rule_judgments_repairs_saved_correction_reference_line():
+    source = """46-48. 指针找最大值
+1 int findMax(int *arr, int n)
+2 {
+3 int *max = arr[0];
+4 for (int i = 1; i < n; i++)
+5 {
+6 if (*(arr + i) > max)
+7 {
+8 max = arr + i;
+9 }
+10 }
+11 return max;
+12 }
+"""
+    review = {
+        "items": [{
+            "question": "46",
+            "source_content": source,
+            "expected_answer": "int *max = arr; 或 int *max = &arr[0];",
+            "recognized_text": "(3)int *max = arr;",
+            "confidence": 0.99,
+            "auto_status": "需人工复核",
+            "reason": "改错题参考答案需要同时提供行号和改错内容",
+            "score": 1,
+        }],
+        "objective": [],
+    }
+    assert exam_review.refresh_rule_judgments(review) is True
+    assert review["items"][0]["expected_answer"].startswith("3. ")
+    assert review["items"][0]["auto_status"] == "自动通过"
+
+
 def test_manual_pass_for_correction_allows_empty_text_and_validates_supplied_text():
     review = {
         "items": [{
