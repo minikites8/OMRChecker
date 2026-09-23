@@ -69,6 +69,14 @@ def parse_args():
         run again until the template is set.",
     )
 
+    argparser.add_argument(
+        "--ui",
+        required=False,
+        dest="ui",
+        action="store_true",
+        help="Launch the local browser-based scanning interface.",
+    )
+
     (
         args,
         unknown,
@@ -96,4 +104,9 @@ def entry_point_for_args(args):
 
 if __name__ == "__main__":
     args = parse_args()
-    entry_point_for_args(args)
+    if args.pop("ui", False):
+        from scan_ui import run_server
+
+        run_server(open_browser=True)
+    else:
+        entry_point_for_args(args)

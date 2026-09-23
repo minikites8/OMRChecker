@@ -7,6 +7,7 @@
 
 """
 import os
+from copy import deepcopy
 from csv import QUOTE_NONNUMERIC
 from pathlib import Path
 from time import time
@@ -31,6 +32,16 @@ from src.utils.interaction import InteractionUtils, Stats
 from src.utils.parsing import get_concatenated_response, open_config_with_defaults
 
 # Load processors
+
+def apply_cli_overrides(tuning_config, args):
+    """Apply command-line settings after local config resolution."""
+    if not args.get("autoAlign", False):
+        return tuning_config
+    overridden_config = deepcopy(tuning_config)
+    overridden_config.alignment_params.auto_align = True
+    return overridden_config
+
+
 STATS = Stats()
 
 
@@ -88,6 +99,7 @@ def process_dir(
     local_config_path = curr_dir.joinpath(CONFIG_FILENAME)
     if os.path.exists(local_config_path):
         tuning_config = open_config_with_defaults(local_config_path)
+    tuning_config = apply_cli_overrides(tuning_config, args)
 
     # Update local template (in current recursion stack)
     local_template_path = curr_dir.joinpath(TEMPLATE_FILENAME)
@@ -314,7 +326,7 @@ def _process_single_image(
         )
 
     resp_array = []
-    for k in template.output_columns:
+    for k in template.result_output_columns:
         resp_array.append(omr_response[k])
 
     outputs_namespace.OUTPUT_SET.append([img_name] + resp_array)

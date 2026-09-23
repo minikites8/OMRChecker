@@ -1,5 +1,6 @@
 import os
 from collections import defaultdict
+from pathlib import Path
 from typing import Any
 
 import cv2
@@ -15,6 +16,7 @@ from src.constants.common import (
     TEXT_SIZE,
 )
 from src.logger import logger
+from src.ocr import create_text_recognizer
 from src.utils.image import CLAHE_HELPER, ImageUtils
 from src.utils.interaction import InteractionUtils
 
@@ -28,9 +30,12 @@ class ImageInstanceOps:
         super().__init__()
         self.tuning_config = tuning_config
         self.save_image_level = tuning_config.outputs.save_image_level
+        self.ocr_recognizer = None
+        self.ocr_source_image = None
 
     def apply_preprocessors(self, file_path, in_omr, template):
         tuning_config = self.tuning_config
+        self.ocr_source_image = None
         # resize to conform to template
         in_omr = ImageUtils.resize_util(
             in_omr,
@@ -45,6 +50,138 @@ class ImageInstanceOps:
                 break
         return in_omr
 
+    @staticmethod
+    def is_text_region_filled(image, bubble, field_block, config):
+        """Detect writing presence in a line-fill region without OCR."""
+        box_w, box_h = field_block.bubble_dimensions
+        x, y = bubble.x + field_block.shift, bubble.y
+        region = image[y : y + box_h, x : x + box_w]
+        if region.size == 0:
+            return False
+        ink_threshold = config.threshold_params.TEXT_INK_THRESHOLD
+        min_ink_ratio = config.threshold_params.TEXT_MIN_INK_RATIO
+        ink_ratio = float(np.mean(region < ink_threshold))
+        return ink_ratio >= min_ink_ratio
+
+    def get_ocr_recognizer(self):
+        if self.ocr_recognizer is None:
+            self.ocr_recognizer = create_text_recognizer(
+                self.tuning_config.ocr_params
+            )
+        return self.ocr_recognizer
+
+    def read_text_fields(
+        self,
+        template,
+        image,
+        name,
+        save_dir=None,
+        alternate_image=None,
+    ):
+        config = self.tuning_config
+        ocr_enabled = config.ocr_params.enabled
+        minimum_confidence = config.ocr_params.min_confidence
+        save_crops = ocr_enabled and config.ocr_params.save_crops
+        source_images = [("preserved", image)]
+        if alternate_image is not None:
+            source_images.append(("aligned", alternate_image))
+
+        candidates = []
+        pending_labels = []
+        pending_regions = []
+        pending_targets = []
+        for source_name, source_image in source_images:
+            states = {}
+            regions = {}
+            candidate = {
+                "source": source_name,
+                "states": states,
+                "regions": regions,
+                "score": 0.0,
+                "recognized": 0,
+            }
+            candidates.append(candidate)
+            for field_block in template.field_blocks:
+                if field_block.field_type != "QTYPE_TEXT":
+                    continue
+                box_w, box_h = field_block.bubble_dimensions
+                for field_block_bubbles in field_block.traverse_bubbles:
+                    text_bubble = field_block_bubbles[0]
+                    field_label = text_bubble.field_label
+                    x = text_bubble.x + field_block.shift
+                    y = text_bubble.y
+                    region = source_image[y : y + box_h, x : x + box_w].copy()
+                    filled = self.is_text_region_filled(
+                        source_image, text_bubble, field_block, config
+                    )
+                    states[field_label] = {
+                        "filled": filled,
+                        "text": "",
+                        "confidence": "",
+                    }
+                    regions[field_label] = region
+                    if not filled or not ocr_enabled:
+                        continue
+                    pending_labels.append(field_label)
+                    pending_regions.append(region)
+                    pending_targets.append((candidate, field_label))
+
+        if pending_regions:
+            try:
+                ocr_results = self.get_ocr_recognizer().recognize(
+                    pending_regions, pending_labels
+                )
+            except Exception as error:
+                logger.error(f"OCR extraction failed for '{name}': {error}")
+                return candidates[0]["states"]
+
+            for (candidate, field_label), result in zip(
+                pending_targets, ocr_results
+            ):
+                state = candidate["states"][field_label]
+                state["confidence"] = f"{result.confidence:.4f}"
+                if result.confidence >= minimum_confidence:
+                    state["text"] = result.text
+                if result.text:
+                    candidate["score"] += result.confidence
+                    candidate["recognized"] += 1
+
+        selected = candidates[0]
+        if len(candidates) > 1 and ocr_enabled:
+            primary_score = candidates[0]["score"] + 0.05 * candidates[0][
+                "recognized"
+            ]
+            alternate_score = candidates[1]["score"] + 0.05 * candidates[1][
+                "recognized"
+            ]
+            if alternate_score > primary_score + 0.15:
+                selected = candidates[1]
+            logger.info(
+                "OCR source selection: "
+                f"preserved={primary_score:.4f}, "
+                f"aligned={alternate_score:.4f}, "
+                f"selected={selected['source']}"
+            )
+
+        crop_directory = None
+        if save_crops and save_dir is not None:
+            crop_directory = Path(save_dir).joinpath("OCR")
+            crop_directory.mkdir(parents=True, exist_ok=True)
+        for field_label, state in selected["states"].items():
+            if crop_directory is not None and state["filled"]:
+                crop_name = f"{Path(name).stem}_{field_label}.png"
+                cv2.imwrite(
+                    str(crop_directory.joinpath(crop_name)),
+                    selected["regions"][field_label],
+                )
+            if state["confidence"]:
+                logger.info(
+                    f"OCR {field_label}: '{state['text']}' "
+                    f"confidence={state['confidence']} "
+                    f"source={selected['source']}"
+                )
+        return selected["states"]
+
     def read_omr_response(self, template, image, name, save_dir=None):
         config = self.tuning_config
         auto_align = config.alignment_params.auto_align
@@ -56,6 +193,19 @@ class ImageInstanceOps:
             )
             if img.max() > img.min():
                 img = ImageUtils.normalize_util(img)
+
+            text_image = self.ocr_source_image
+            if text_image is not None:
+                text_image = ImageUtils.resize_util(
+                    text_image,
+                    template.page_dimensions[0],
+                    template.page_dimensions[1],
+                )
+                if text_image.max() > text_image.min():
+                    text_image = ImageUtils.normalize_util(text_image)
+            else:
+                text_image = img
+
             # Processing copies
             transp_layer = img.copy()
             final_marked = img.copy()
@@ -198,6 +348,15 @@ class ImageInstanceOps:
                     #   "origin:", field_block.origin,'\n')
                 # print("End Alignment")
 
+            alternate_text_image = img if self.ocr_source_image is not None else None
+            text_field_results = self.read_text_fields(
+                template,
+                text_image,
+                name,
+                save_dir,
+                alternate_image=alternate_text_image,
+            )
+
             final_align = None
             if config.outputs.show_image_level >= 2:
                 initial_align = self.draw_template_layout(img, template, shifted=False)
@@ -275,6 +434,34 @@ class ImageInstanceOps:
                 # cv2.rectangle(final_marked,(s[0]+shift,s[1]),(s[0]+shift+d[0],
                 #   s[1]+d[1]),CLR_BLACK,3)
                 for field_block_bubbles in field_block.traverse_bubbles:
+                    if field_block.field_type == "QTYPE_TEXT":
+                        text_bubble = field_block_bubbles[0]
+                        field_label = text_bubble.field_label
+                        text_state = text_field_results[field_label]
+                        if text_state["filled"]:
+                            omr_response[field_label] = "FILLED"
+                            x, y = text_bubble.x + field_block.shift, text_bubble.y
+                            cv2.rectangle(
+                                final_marked,
+                                (int(x), int(y)),
+                                (int(x + box_w), int(y + box_h)),
+                                CLR_DARK_GRAY,
+                                3,
+                            )
+                        else:
+                            omr_response[field_label] = field_block.empty_val
+
+                        ocr_columns = template.ocr_column_map.get(field_label)
+                        if ocr_columns is not None:
+                            text_column, confidence_column = ocr_columns
+                            omr_response[text_column] = text_state["text"]
+                            omr_response[confidence_column] = text_state[
+                                "confidence"
+                            ]
+                        block_q_strip_no += 1
+                        total_q_strip_no += 1
+                        continue
+
                     # All Black or All White case
                     no_outliers = all_q_std_vals[total_q_strip_no] < global_std_thresh
                     # print(total_q_strip_no, field_block_bubbles[0].field_label,
@@ -726,5 +913,6 @@ class ImageInstanceOps:
             ImageUtils.save_img(f"{save_dir}stack/{name}_{str(key)}_stack.jpg", result)
 
     def reset_all_save_img(self):
+        self.ocr_source_image = None
         for i in range(self.save_image_level):
             self.save_img_list[i + 1] = []

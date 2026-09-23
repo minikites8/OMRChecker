@@ -59,13 +59,13 @@ def setup_outputs_for_template(paths, template):
     # Include current output paths
     ns.paths = paths
 
-    ns.empty_resp = [""] * len(template.output_columns)
+    ns.empty_resp = [""] * len(template.result_output_columns)
     ns.sheetCols = [
         "file_id",
         "input_path",
         "output_path",
         "score",
-    ] + template.output_columns
+    ] + template.result_output_columns
     ns.OUTPUT_SET = []
     ns.files_obj = {}
     TIME_NOW_HRS = strftime("%I%p", localtime())

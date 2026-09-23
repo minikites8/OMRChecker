@@ -9,6 +9,7 @@
 from src.constants.common import FIELD_TYPES
 from src.core import ImageInstanceOps
 from src.logger import logger
+from src.ocr import build_ocr_column_map
 from src.processors.manager import PROCESSOR_MANAGER
 from src.utils.parsing import (
     custom_sort_output_columns,
@@ -60,6 +61,19 @@ class Template:
             self.fill_output_columns(non_custom_columns, all_custom_columns)
 
         self.validate_template_columns(non_custom_columns, all_custom_columns)
+        self.setup_ocr_output_columns(tuning_config)
+
+    def setup_ocr_output_columns(self, tuning_config):
+        text_labels = {
+            field_label
+            for field_block in self.field_blocks
+            if field_block.field_type == "QTYPE_TEXT"
+            for field_label in field_block.parsed_field_labels
+        }
+        self.ocr_column_map, self.ocr_output_columns = build_ocr_column_map(
+            self.output_columns, text_labels, tuning_config.ocr_params
+        )
+        self.result_output_columns = self.output_columns + self.ocr_output_columns
 
     def parse_output_columns(self, output_columns_array):
         self.output_columns = parse_fields(f"Output Columns", output_columns_array)
@@ -241,6 +255,7 @@ class FieldBlock:
                 "emptyValue",
             ],
         )
+        self.field_type = field_type
         self.parsed_field_labels = parse_fields(
             f"Field Block Labels: {self.name}", field_labels
         )

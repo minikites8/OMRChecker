@@ -15,6 +15,8 @@ CONFIG_DEFAULTS = DotMap(
             "CONFIDENT_SURPLUS": 5,
             "JUMP_DELTA": 30,
             "PAGE_TYPE_FOR_THRESHOLD": "white",
+            "TEXT_INK_THRESHOLD": 180,
+            "TEXT_MIN_INK_RATIO": 0.01,
         },
         "alignment_params": {
             # Note: 'auto_align' enables automatic template alignment, use if the scans show slight misalignments.
@@ -27,6 +29,23 @@ CONFIG_DEFAULTS = DotMap(
         "pdf_params": {
             "pdf_dpi": "auto",
             "pdf_page": 1,
+        },
+        "ocr_params": {
+            "enabled": False,
+            "provider": "paddleocr",
+            "model_name": "PP-OCRv6_medium_rec",
+            "device": "cpu",
+            "min_confidence": 0.65,
+            "text_suffix": "_ocr",
+            "confidence_suffix": "_ocr_confidence",
+            "batch_size": 8,
+            "upscale": 2.5,
+            "padding_x": 20,
+            "padding_y": 12,
+            "trim_whitespace": True,
+            "save_crops": False,
+            "skip_model_source_check": True,
+            "field_charsets": {},
         },
         "outputs": {
             "show_image_level": 0,

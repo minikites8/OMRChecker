@@ -32,6 +32,7 @@ class FeatureBasedAlignment(ImagePreprocessor):
         self.max_features = int(options.get("maxFeatures", DEFAULT_MAX_FEATURES))
         self.good_match_percent = options.get("goodMatchPercent", DEFAULT_GOOD_MATCH_PERCENT)
         self.transform_2_d = options.get("2d", False)
+        self.preserve_for_ocr = bool(options.get("preserveForOCR", False))
         # Extract keypoints and description of source image
         self.orb = cv2.ORB_create(self.max_features)
         self.to_keypoints, self.to_descriptors = self.orb.detectAndCompute(
@@ -46,6 +47,8 @@ class FeatureBasedAlignment(ImagePreprocessor):
 
     def apply_filter(self, image, _file_path):
         config = self.tuning_config
+        if self.preserve_for_ocr:
+            self.image_instance_ops.ocr_source_image = image.copy()
         # Convert images to grayscale
         # im1Gray = cv2.cvtColor(im1, cv2.COLOR_BGR2GRAY)
         # im2Gray = cv2.cvtColor(im2, cv2.COLOR_BGR2GRAY)

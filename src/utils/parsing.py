@@ -42,6 +42,9 @@ def get_concatenated_response(omr_response, template):
     for field_label in template.non_custom_labels:
         concatenated_response[field_label] = omr_response[field_label]
 
+    for field_label in template.ocr_output_columns:
+        concatenated_response[field_label] = omr_response.get(field_label, "")
+
     return concatenated_response
 
 

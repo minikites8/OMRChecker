@@ -28,6 +28,7 @@ class CropOnMarkers(ImagePreprocessor):
         config = self.tuning_config
         marker_ops = self.options
         self.threshold_circles = []
+        self.marker_centers = []
         # img_utils = ImageUtils()
 
         # options with defaults
@@ -157,6 +158,7 @@ class CropOnMarkers(ImagePreprocessor):
         logger.info(f"Optimal Scale: {best_scale}")
         # analysis data
         self.threshold_circles.append(sum_t / 4)
+        self.marker_centers = np.asarray(centres, dtype=np.float32)
 
         image = ImageUtils.four_point_transform(image, np.array(centres))
         # appendSaveImg(1,image_eroded_sub)

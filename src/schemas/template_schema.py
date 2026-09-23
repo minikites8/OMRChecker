@@ -21,6 +21,27 @@ two_positive_numbers = {
     "maxItems": 2,
     "minItems": 2,
 }
+
+four_positive_integers = {
+    "type": "array",
+    "prefixItems": [
+        positive_integer,
+        positive_integer,
+        positive_integer,
+        positive_integer,
+    ],
+    "maxItems": 4,
+    "minItems": 4,
+}
+two_zero_to_one_numbers = {
+    "type": "array",
+    "prefixItems": [
+        {"type": "number", "minimum": 0, "maximum": 1},
+        {"type": "number", "minimum": 0, "maximum": 1},
+    ],
+    "maxItems": 2,
+    "minItems": 2,
+}
 zero_to_one_number = {
     "type": "number",
     "minimum": 0,
@@ -70,6 +91,7 @@ TEMPLATE_SCHEMA = {
                     "name": {
                         "type": "string",
                         "enum": [
+                            "AlignPageBorder",
                             "CropOnMarkers",
                             "CropPage",
                             "FeatureBasedAlignment",
@@ -81,6 +103,33 @@ TEMPLATE_SCHEMA = {
                 },
                 "required": ["name", "options"],
                 "allOf": [
+                    {
+                        "if": {"properties": {"name": {"const": "AlignPageBorder"}}},
+                        "then": {
+                            "properties": {
+                                "options": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "targetRect": four_positive_integers,
+                                        "topSearch": two_zero_to_one_numbers,
+                                        "bottomSearch": two_zero_to_one_numbers,
+                                        "leftSearch": two_zero_to_one_numbers,
+                                        "rightSearch": two_zero_to_one_numbers,
+                                        "blurKernel": two_positive_integers,
+                                        "cannyThresholds": two_positive_integers,
+                                        "houghThreshold": positive_integer,
+                                        "thetaDivisor": positive_integer,
+                                        "angleTolerance": positive_number,
+                                        "maxBottomLineRank": positive_integer,
+                                        "minAreaRatio": zero_to_one_number,
+                                        "disableAutoAlign": {"type": "boolean"},
+                                    },
+                                    "required": ["targetRect"],
+                                }
+                            }
+                        },
+                    },
                     {
                         "if": {"properties": {"name": {"const": "CropOnMarkers"}}},
                         "then": {
@@ -116,6 +165,7 @@ TEMPLATE_SCHEMA = {
                                         "goodMatchPercent": {"type": "number"},
                                         "maxFeatures": {"type": "integer"},
                                         "reference": {"type": "string"},
+                                        "preserveForOCR": {"type": "boolean"},
                                     },
                                     "required": ["reference"],
                                 }
