@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 · 阅卷台</title>
+  <link rel="stylesheet" href="/static/login.css">
+</head>
+<body>
+  <main class="login-shell">
+    <section class="login-card" aria-labelledby="loginTitle">
+      <p class="eyebrow">OMRChecker</p>
+      <h1 id="loginTitle">登录阅卷台</h1>
+      <p class="subtitle">使用统一身份认证或内置账号进入试卷自动批改平台。</p>
+      <a class="oidc-button" id="oidcLogin" href="/auth/oidc/start" hidden>使用统一身份认证登录</a>
+      <div class="divider"><span>内置账号</span></div>
+      <form id="loginForm">
+        <label>邮箱<input name="email" type="email" autocomplete="username" required></label>
+        <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
+        <button type="submit">登录</button>
+      </form>
+      <p class="message" id="loginMessage" role="alert"></p>
+    </section>
+  </main>
+  <script src="/static/login.js"></script>
+</body>
+</html>

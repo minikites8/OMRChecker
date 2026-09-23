@@ -144,7 +144,7 @@ class TemplateManager:
             entry = dict(self._entry(template_id, registry))
             entry["active"] = entry["id"] == registry.get("active_template_id")
             entry["recognition"] = self._recognition(entry["id"])
-            scan_root = (self.project_root / entry.get("scan_source", "inputs/phone_scan")).resolve()
+            scan_root = self._scan_root(entry)
             entry["scan_ready"] = (scan_root / "template.json").is_file() and (scan_root / "config.json").is_file()
             entry["review_ready"] = bool(entry["recognition"].get("reference_pdf")) and Path(entry["recognition"].get("reference_pdf", "")).is_file()
             return entry
@@ -155,11 +155,20 @@ class TemplateManager:
             items = [self.get(entry["id"]) for entry in registry["templates"]]
             return {"ok": True, "active_template_id": registry.get("active_template_id", ""), "templates": items}
 
+    def _scan_root(self, entry):
+        if entry.get("builtin"):
+            root = (self.project_root / entry.get("scan_source", "inputs/phone_scan")).resolve()
+            if root != self.project_root and self.project_root not in root.parents:
+                raise ValueError("扫描模板路径超出项目目录")
+        else:
+            root = (self.storage_root / entry["id"]).resolve()
+            if root != self.storage_root and self.storage_root not in root.parents:
+                raise ValueError("扫描模板路径超出模板存储目录")
+        return root
+
     def scan_root(self, template_id=None):
-        entry = self.get(template_id)
-        root = (self.project_root / entry.get("scan_source", "inputs/phone_scan")).resolve()
-        if root != self.project_root and self.project_root not in root.parents:
-            raise ValueError("扫描模板路径超出项目目录")
+        entry = self._entry(template_id)
+        root = self._scan_root(entry)
         if not root.is_dir():
             raise ValueError("扫描模板资源不存在")
         return root
@@ -178,12 +187,13 @@ class TemplateManager:
             template_id = base if re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,63}", base or "") else "template-" + uuid.uuid4().hex[:8]
             if any(item.get("id") == template_id for item in registry["templates"]):
                 raise ValueError("模板编号已存在")
-            source_folder = self.storage_root / source["id"]
+            source_folder = self.scan_root(source["id"])
             target_folder = self.storage_root / template_id
-            if source_folder.is_dir():
-                shutil.copytree(source_folder, target_folder)
+            shutil.copytree(source_folder, target_folder)
+            source_recognition = self.storage_root / source["id"] / "recognition.json"
+            if source_recognition.is_file():
+                shutil.copy2(source_recognition, target_folder / "recognition.json")
             else:
-                target_folder.mkdir(parents=True)
                 self._write_recognition(template_id, {})
             now = self._now()
             entry = {

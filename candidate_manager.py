@@ -52,6 +52,10 @@ def question_score_records(review):
                 awarded = score if status in pass_statuses else 0
             records.append({
                 "question": str(item.get("question", "")),
+                "question_id": item.get("id") or item.get("question_id", ""),
+                "id": item.get("id") or item.get("question_id", ""),
+                "session_id": item.get("session_id", ""),
+                "section_id": item.get("section_id", ""),
                 "major_question": str(item.get("major_question") or ""),
                 "type": question_type,
                 "score": score,
@@ -76,6 +80,7 @@ def candidate_record(review, root):
     blockers=grade_confirmation_blockers(review)
     image=Path(root)/identifier/'output/handwriting/identity/name.png'
     return {'review_id':identifier,'student_id':str(review.get('student_id') or ''),
+            'session_id':review.get('session_id', ''),
             'student_name':str(review.get('student_name') or ''),
             'student_name_status':review.get('student_name_status','待识别'),
             'student_name_confidence':review.get('student_name_confidence',0),

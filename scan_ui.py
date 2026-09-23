@@ -28,15 +28,30 @@ from ai_judge import ai_config, ai_is_configured
 from exam_import import import_exam_and_answers
 from exam_review import apply_ai_review, apply_manual_review, attach_structured_scores, build_review_from_structured, refresh_rule_judgments, _import_variant_for_review as exam_review_variant_for_review
 from scan_templates import TemplateManager
+from platform_auth import AuthError, AuthService
+from platform_config import PlatformSettings
+from platform_cos import TencentCosStorage
+from platform_database import PostgresStore
+from platform_persistence import PlatformPersistence
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+DATA_ROOT = Path(os.environ.get("OMR_DATA_ROOT") or PROJECT_ROOT).expanduser().resolve()
 UI_ROOT = PROJECT_ROOT / "ui"
 TEMPLATE_ROOT = PROJECT_ROOT / "inputs" / "phone_scan"
-TEMPLATE_MANAGER = TemplateManager(PROJECT_ROOT, TEMPLATE_ROOT)
-JOBS_ROOT = PROJECT_ROOT / "outputs" / "scan_ui"
-SHEETS_ROOT = PROJECT_ROOT / "output" / "pdf" / "web_designer"
-REVIEW_ROOT = PROJECT_ROOT / "outputs" / "answer_review"
-IMPORT_ROOT = PROJECT_ROOT / "outputs" / "exam_imports"
+TEMPLATE_MANAGER = TemplateManager(
+    PROJECT_ROOT,
+    TEMPLATE_ROOT,
+    storage_root=DATA_ROOT / "inputs" / "scan_templates",
+)
+JOBS_ROOT = DATA_ROOT / "outputs" / "scan_ui"
+SHEETS_ROOT = DATA_ROOT / "output" / "pdf" / "web_designer"
+REVIEW_ROOT = DATA_ROOT / "outputs" / "answer_review"
+IMPORT_ROOT = DATA_ROOT / "outputs" / "exam_imports"
+PLATFORM_SETTINGS = PlatformSettings.from_env()
+PLATFORM_DATABASE = PostgresStore(PLATFORM_SETTINGS.database_url)
+PLATFORM_COS = TencentCosStorage(PLATFORM_SETTINGS)
+PLATFORM_PERSISTENCE = PlatformPersistence(PLATFORM_SETTINGS, PLATFORM_DATABASE, PLATFORM_COS)
+AUTH_SERVICE = AuthService(PLATFORM_SETTINGS, PLATFORM_DATABASE)
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf"}
 MAX_REQUEST_BYTES = 256 * 1024 * 1024
 MAX_FILE_BYTES = 24 * 1024 * 1024
@@ -220,6 +235,8 @@ def run_exam_import(payload):
     exam_path.write_text(json.dumps(imported["exam"]["sections"], ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     answers_path = import_root / "answer_map.json"
     answers_path.write_text(json.dumps({"answer_map": imported["answer_map"]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    owner_user_id = str(payload.get("_actor_user_id") or "")
+    PLATFORM_PERSISTENCE.sync_tree(import_root, "exam_import", owner_user_id)
     return {
         "ok": True,
         "import_id": import_id,
@@ -282,7 +299,7 @@ def _review_import(payload):
 
 def _create_review_report(import_id, normalized_path, imported, card_files,
                           batch_id="", batch_index=0, label="", update_latest=True,
-                          template_id=None):
+                          template_id=None, owner_user_id=""):
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     review_id = "{}-{}".format(stamp, uuid.uuid4().hex[:6])
     review_root = REVIEW_ROOT / review_id
@@ -308,6 +325,7 @@ def _create_review_report(import_id, normalized_path, imported, card_files,
     report.setdefault("paper_type_status", "待复核")
     report["review_id"] = review_id
     report["import_id"] = import_id
+    report["owner_user_id"] = owner_user_id
     report["template_id"] = selected_template["id"]
     report["template_name"] = selected_template["name"]
     report["card_files"] = [path.name for path in card_paths]
@@ -336,6 +354,7 @@ def _create_review_report(import_id, normalized_path, imported, card_files,
         return start_ai_review({"review_id": review_id})
     report["ai_judgment"] = {"status": "未配置", "enabled": False, "processed": 0, "message": "AI接口等待配置"}
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    PLATFORM_PERSISTENCE.sync_tree(review_root, "review", owner_user_id)
     report["report_url"] = "/reviews/{}/output/review.json".format(review_id)
     return report
 
@@ -347,7 +366,8 @@ def run_review_job(payload):
         raise ValueError("请选择答题卡照片或 PDF")
     return _create_review_report(
         import_id, normalized_path, imported, card_files, update_latest=True,
-        template_id=payload.get("template_id")
+        template_id=payload.get("template_id"),
+        owner_user_id=str(payload.get("_actor_user_id") or ""),
     )
 
 
@@ -424,7 +444,7 @@ def _compact_review(report, label=""):
     }
 
 
-def _batch_review_worker(batch_id, import_id, normalized_path, imported, groups, concurrency, template_id):
+def _batch_review_worker(batch_id, import_id, normalized_path, imported, groups, concurrency, template_id, owner_user_id=""):
     _clean_id, batch_path = _batch_path(batch_id)
     started = time.perf_counter()
     try:
@@ -449,6 +469,7 @@ def _batch_review_worker(batch_id, import_id, normalized_path, imported, groups,
                     group["label"],
                     False,
                     template_id,
+                    owner_user_id,
                 )
 
         futures = {
@@ -537,7 +558,7 @@ def start_batch_review(payload):
         _write_batch(batch_path, batch)
         worker = threading.Thread(
             target=_batch_review_worker,
-            args=(batch_id, import_id, normalized_path, imported, groups, concurrency, selected_template["id"]),
+            args=(batch_id, import_id, normalized_path, imported, groups, concurrency, selected_template["id"], str(payload.get("_actor_user_id") or "")),
             daemon=True,
             name="omr-batch-{}".format(batch_id),
         )
@@ -593,6 +614,16 @@ def _load_review(review_id):
 
 def _write_review(path, review):
     path.write_text(json.dumps(review, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    try:
+        relative = Path(path).resolve().relative_to(REVIEW_ROOT.resolve())
+        PLATFORM_PERSISTENCE.sync_file(
+            path,
+            "review",
+            str(review.get("owner_user_id") or ""),
+            relative,
+        )
+    except ValueError:
+        pass
 
 
 def _ensure_review_scores(review):
@@ -689,6 +720,7 @@ def export_confirmed_grades(selected_ids=None):
         grades.append({
             "review_id": record.get("review_id", ""),
             "student_name": record.get("student_name", ""),
+            "session_id": record.get("session_id", ""),
             "student_id": record.get("student_id", ""),
             "paper_type": record.get("paper_type", ""),
             "score": summary.get("total_score", 0),
@@ -801,7 +833,7 @@ def start_ai_review(payload):
     return review
 
 
-def run_scan_job(files=None, demo=False, template_id=None):
+def run_scan_job(files=None, demo=False, template_id=None, owner_user_id=""):
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     job_id = "{}-{}".format(stamp, uuid.uuid4().hex[:6])
     job_root = JOBS_ROOT / job_id
@@ -841,6 +873,14 @@ def run_scan_job(files=None, demo=False, template_id=None):
         raise ScanFailure("扫描程序退出状态为 {}".format(completed.returncode), log)
     csv_path = latest_result_csv(output_dir)
     columns, rows = read_results(csv_path, job_id, job_root)
+    PLATFORM_PERSISTENCE.sync_tree(job_root, "scan_job", owner_user_id)
+    PLATFORM_PERSISTENCE.record_job(
+        job_id,
+        owner_user_id,
+        "scan",
+        "completed",
+        {"template_id": selected_template["id"], "file_count": len(uploaded)},
+    )
     return {
         "ok": True,
         "job_id": job_id,
@@ -866,17 +906,60 @@ class ScanUIHandler(BaseHTTPRequestHandler):
     def log_message(self, format_string, *args):
         sys.stdout.write("[scan-ui] {}\n".format(format_string % args))
 
-    def send_bytes(self, status, content, content_type):
+    def send_bytes(self, status, content, content_type, headers=None):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(content)))
         self.send_header("Cache-Control", "no-store")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(content)
 
-    def send_json(self, status, payload):
+    def send_json(self, status, payload, headers=None):
         content = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        self.send_bytes(status, content, "application/json; charset=utf-8")
+        self.send_bytes(status, content, "application/json; charset=utf-8", headers=headers)
+
+    def send_redirect(self, location, headers=None):
+        self.send_response(302)
+        self.send_header("Location", location)
+        self.send_header("Cache-Control", "no-store")
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
+        self.end_headers()
+
+    def _current_user(self):
+        return AUTH_SERVICE.user_from_headers(self.headers.get("Cookie", ""))
+
+    def _authorize(self, route):
+        if not AUTH_SERVICE.enabled:
+            return True
+        if route in {"/", "/login", "/api/health", "/api/session", "/auth/oidc/start", "/auth/oidc/callback", "/logout"}:
+            if route != "/" or self._current_user():
+                return True
+            self.send_redirect("/login")
+            return False
+        if route.startswith("/static/"):
+            return True
+        if self._current_user():
+            return True
+        self.send_json(401, {"ok": False, "error": "需要登录", "login_url": "/login"})
+        return False
+
+    @staticmethod
+    def _public_user(user):
+        if not user:
+            return None
+        return {
+            "id": str(user.get("id") or user.get("sub") or ""),
+            "email": str(user.get("email") or ""),
+            "display_name": str(user.get("display_name") or ""),
+            "role": str(user.get("role") or "teacher"),
+            "auth_provider": str(user.get("auth_provider") or ""),
+        }
+
+    def _oidc_redirect_uri(self):
+        return PLATFORM_SETTINGS.oidc_redirect_uri or PLATFORM_SETTINGS.public_base_url + "/auth/oidc/callback"
 
     def send_json_download(self, status, payload, filename):
         content = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
@@ -896,32 +979,71 @@ class ScanUIHandler(BaseHTTPRequestHandler):
         self.send_bytes(200, path.read_bytes(), content_type)
 
     def do_GET(self):
-        route = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        route = parsed.path
         try:
-            if route == "/":
+            if route == "/login":
+                self.send_file(UI_ROOT / "login.html")
+            elif route == "/auth/oidc/start":
+                url, state_cookie = AUTH_SERVICE.begin_oidc(self._oidc_redirect_uri())
+                self.send_redirect(url, {"Set-Cookie": state_cookie})
+            elif route == "/auth/oidc/callback":
+                query = parse_qs(parsed.query)
+                code = (query.get("code") or [""])[0]
+                state = (query.get("state") or [""])[0]
+                if not code or not state:
+                    raise AuthError("OIDC 回调缺少 code 或 state")
+                user = AUTH_SERVICE.complete_oidc(
+                    code,
+                    state,
+                    self.headers.get("Cookie", ""),
+                    self._oidc_redirect_uri(),
+                )
+                headers = {"Set-Cookie": AUTH_SERVICE.session_cookie(user)}
+                self.send_redirect("/", headers)
+            elif route == "/logout":
+                self.send_redirect("/login", {"Set-Cookie": AUTH_SERVICE.clear_session_cookie()})
+            elif route == "/api/session":
+                user = self._current_user()
+                self.send_json(200, {"ok": True, "authenticated": bool(user), "user": self._public_user(user), "auth": PLATFORM_SETTINGS.public_config()})
+            elif not self._authorize(route):
+                return
+            elif route == "/":
                 self.send_file(UI_ROOT / "index.html")
             elif route == "/api/health":
                 ai_settings = ai_config()
-                self.send_json(200, {"ok": True, "service": "OMR 扫描台", "review_concurrency": DEFAULT_REVIEW_WORKERS, "ai_judgment": {"configured": ai_is_configured(), "model": ai_settings["model"], "concurrency": ai_settings["concurrency"], "review_workers": DEFAULT_AI_WORKERS}})
+                self.send_json(200, {
+                    "ok": True,
+                    "service": "OMR 扫描台",
+                    "review_concurrency": DEFAULT_REVIEW_WORKERS,
+                    "ai_judgment": {
+                        "configured": ai_is_configured(),
+                        "model": ai_settings["model"],
+                        "concurrency": ai_settings["concurrency"],
+                        "review_workers": DEFAULT_AI_WORKERS,
+                    },
+                    "platform": PLATFORM_SETTINGS.public_config(),
+                    "persistence": PLATFORM_PERSISTENCE.health(),
+                })
             elif route == "/api/templates":
                 self.send_json(200, TEMPLATE_MANAGER.list())
             elif route == "/api/candidates":
                 self.send_json(200, CANDIDATE_MANAGER.list())
             elif route == "/api/candidates/export.json":
-                query = parse_qs(urlparse(self.path).query)
+                query = parse_qs(parsed.query)
                 selected_ids = (query.get("review_id") or []) + (query.get("review_ids") or [])
                 selected_ids = [item for value in selected_ids for item in str(value).split(",") if item.strip()]
                 self.send_json_download(200, export_confirmed_grades(selected_ids if selected_ids else None), "已确认成绩.json")
             elif route == "/api/exam/imports":
                 self.send_json(200, {"ok": True, "imports": list_exam_imports()})
             elif route == "/api/review/objective-view":
-                query = parse_qs(urlparse(self.path).query)
+                query = parse_qs(parsed.query)
                 self.send_json(200, read_objective_view((query.get("review_id") or [""])[0]))
             elif route == "/api/review/status":
-                query = parse_qs(urlparse(self.path).query)
+                query = parse_qs(parsed.query)
                 self.send_json(200, read_review_status((query.get("review_id") or [""])[0]))
             elif route == "/api/review/batch/status":
-                query = parse_qs(urlparse(self.path).query)
+                query = parse_qs(parsed.query)
                 self.send_json(200, read_batch_status((query.get("batch_id") or [""])[0]))
             elif route.startswith("/static/"):
                 self.send_file(resolve_under(UI_ROOT, unquote(route[8:])))
@@ -935,13 +1057,16 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                 self.send_file(resolve_under(IMPORT_ROOT, unquote(route[9:])))
             else:
                 self.send_json(404, {"ok": False, "error": "接口不存在"})
+        except AuthError as error:
+            self.send_json(401, {"ok": False, "error": str(error), "login_url": "/login"})
         except ValueError as error:
             self.send_json(400, {"ok": False, "error": str(error)})
-
     def do_POST(self):
         route = urlparse(self.path).path
-        if route not in ("/api/scan", "/api/demo", "/api/sheets", "/api/exam/import", "/api/review", "/api/review/batch", "/api/review/ai-judge", "/api/review/confirm", "/api/review/confirm-grade", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
+        if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/exam/import", "/api/review", "/api/review/batch", "/api/review/ai-judge", "/api/review/confirm", "/api/review/confirm-grade", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
             self.send_json(404, {"ok": False, "error": "接口不存在"})
+            return
+        if route != "/api/auth/login" and not self._authorize(route):
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -949,6 +1074,12 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                 raise ValueError("本次上传大小上限为 256 MB")
             raw = self.rfile.read(length)
             payload = json.loads(raw.decode("utf-8")) if raw else {}
+            if route == "/api/auth/login":
+                user = AUTH_SERVICE.login_builtin(payload.get("email", ""), payload.get("password", ""))
+                self.send_json(200, {"ok": True, "user": self._public_user(user)}, {"Set-Cookie": AUTH_SERVICE.session_cookie(user)})
+                return
+            current_user = self._current_user() or {}
+            payload["_actor_user_id"] = current_user.get("sub") or current_user.get("id") or ""
             if route == "/api/templates/create":
                 result = TEMPLATE_MANAGER.create(payload)
             elif route == "/api/templates/update":
@@ -987,9 +1118,12 @@ class ScanUIHandler(BaseHTTPRequestHandler):
             else:
                 result = run_scan_job(
                     files=payload.get("files", []), demo=route == "/api/demo",
-                    template_id=payload.get("template_id")
+                    template_id=payload.get("template_id"),
+                    owner_user_id=str(payload.get("_actor_user_id") or ""),
                 )
             self.send_json(200, result)
+        except AuthError as error:
+            self.send_json(401, {"ok": False, "error": str(error), "login_url": "/login"})
         except (ValueError, json.JSONDecodeError) as error:
             self.send_json(400, {"ok": False, "error": str(error)})
         except ScanFailure as error:
@@ -1013,6 +1147,9 @@ def create_server(host="127.0.0.1", port=8765):
 
 
 def run_server(host="127.0.0.1", port=8765, open_browser=False):
+    AUTH_SERVICE.startup()
+    PLATFORM_PERSISTENCE.startup()
+    DATA_ROOT.mkdir(parents=True, exist_ok=True)
     UI_ROOT.mkdir(parents=True, exist_ok=True)
     JOBS_ROOT.mkdir(parents=True, exist_ok=True)
     SHEETS_ROOT.mkdir(parents=True, exist_ok=True)
@@ -1035,7 +1172,7 @@ def self_test():
     for name in ("index.html", "app.css", "app.js"):
         if not (UI_ROOT / name).is_file():
             raise RuntimeError("缺少 UI 文件：{}".format(name))
-    temporary = PROJECT_ROOT / "tmp" / "scan_ui_self_test_assets"
+    temporary = DATA_ROOT / "tmp" / "scan_ui_self_test_assets"
     copy_template_assets(temporary)
     server = create_server("127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -1056,10 +1193,22 @@ def self_test():
     ))
 
 
+def _configured_port():
+    value = os.environ.get("PORT", os.environ.get("OMR_PORT", "8765"))
+    try:
+        return max(0, min(65535, int(value)))
+    except (TypeError, ValueError):
+        return 8765
+
+
 def parse_args():
-    parser = argparse.ArgumentParser(description="OMRChecker 本地扫描界面")
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--port", type=int, default=8765)
+    parser = argparse.ArgumentParser(description="OMRChecker 试卷自动批改平台")
+    parser.add_argument("--host", default=os.environ.get("OMR_HOST", "127.0.0.1"))
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=_configured_port(),
+    )
     parser.add_argument("--open", action="store_true", dest="open_browser")
     parser.add_argument("--self-test", action="store_true")
     return parser.parse_args()

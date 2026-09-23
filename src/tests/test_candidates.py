@@ -251,3 +251,24 @@ def test_grade_confirmation_http_endpoints(tmp_path, monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join(timeout=3)
+
+
+def test_question_score_records_preserve_scout_native_ids():
+    from candidate_manager import question_score_records
+
+    records = question_score_records({
+        "objective": [{
+            "question": "1",
+            "id": 78,
+            "session_id": 14,
+            "section_id": 13,
+            "auto_status": "自动通过",
+            "score": 2,
+        }],
+        "items": [],
+    })
+
+    assert records[0]["id"] == 78
+    assert records[0]["question_id"] == 78
+    assert records[0]["session_id"] == 14
+    assert records[0]["section_id"] == 13

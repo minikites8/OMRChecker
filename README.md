@@ -104,6 +104,11 @@ We now support [colored outputs](https://github.com/Udayraj123/OMRChecker/wiki/%
 
 #### There are many more visuals in the wiki. Check them out [here!](https://github.com/Udayraj123/OMRChecker/wiki/Rich-Visuals)
 
+## Deployment platform
+
+生产部署采用前后端分离：FastAPI 后端位于 `backend/`，当前 UI 由 Nginx 独立容器提供。登录支持外部 OIDC 和 PostgreSQL 内置账号，业务元数据写入 PostgreSQL，扫描件、答题卡、裁剪图和批改报告写入腾讯云 COS。
+
+部署入口：`deploy/docker-compose.yml`。配置项示例：`deploy/.env.example`。
 ## Getting started
 
 ![Setup Time](https://img.shields.io/badge/Setup_Time-20_min-blue.svg)

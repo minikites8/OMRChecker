@@ -1033,6 +1033,60 @@ def _score_number(value):
     return int(rounded) if rounded.is_integer() else rounded
 
 
+def _structured_question_labels(question):
+    """返回答题卡题号，用于把外部题目 ID 关联到本地题号。"""
+    title = str(question.get("title") or "")
+    match = re.match(r"\s*(\d+)\s*[-~至–—]\s*(\d+)", title)
+    if match:
+        first, last = map(int, match.groups())
+        return [str(number) for number in range(first, last + 1)]
+    match = re.match(r"\s*(\d+)", title)
+    if match:
+        return [match.group(1)]
+    return []
+
+
+def _structured_question_metadata(exam):
+    metadata = {}
+    for section in exam.get("sections", []):
+        section_id = section.get("id")
+        session_id = section.get("session_id")
+        for question in section.get("questions", []):
+            question_id = question.get("id")
+            question_metadata = {
+                "id": question_id,
+                "session_id": question.get("session_id", session_id),
+                "section_id": question.get("section_id", section_id),
+            }
+            keys = list(question.get("question_ids", []))
+            keys.extend(_structured_question_labels(question))
+            if question_id is not None:
+                keys.append(question_id)
+            for key in keys:
+                if key not in (None, ""):
+                    metadata[str(key)] = dict(question_metadata)
+    return metadata
+
+
+def _structured_alias_maps(exam, source_map, answer_map):
+    """为 Scout 原生题目 ID补充答题卡题号别名。"""
+    aliases_source = dict(source_map or {})
+    aliases_answer = dict(answer_map or {})
+    for section in exam.get("sections", []):
+        for question in section.get("questions", []):
+            labels = _structured_question_labels(question)
+            ids = [str(item) for item in question.get("question_ids", []) if str(item)]
+            native_id = str(question.get("id") or "")
+            source = next((aliases_source[key] for key in [native_id, *ids] if key in aliases_source), "")
+            answer = next((aliases_answer[key] for key in [native_id, *ids] if key in aliases_answer), None)
+            for label in labels:
+                if source and label not in aliases_source:
+                    aliases_source[label] = source
+                if answer not in (None, "") and label not in aliases_answer:
+                    aliases_answer[label] = answer
+    return aliases_source, aliases_answer
+
+
 def _structured_score_map(exam):
     scores = {}
     for section in exam.get("sections", []):
@@ -1053,9 +1107,14 @@ def _structured_score_map(exam):
                         assigned[key] = value
             if assigned and len(assigned) == len(ids) and abs(sum(assigned.values()) - total) <= 0.01:
                 scores.update({key: _score_number(value) for key, value in assigned.items()})
+                for local_key in _structured_question_labels(question):
+                    scores.setdefault(local_key, _score_number(total / len(ids)))
                 continue
             share = total / len(ids)
-            scores.update({key: _score_number(share) for key in ids})
+            values = {key: _score_number(share) for key in ids}
+            for local_key in _structured_question_labels(question):
+                values.setdefault(local_key, _score_number(share))
+            scores.update(values)
     return scores
 
 
@@ -1360,9 +1419,12 @@ def build_review_from_structured(exam_text, answer_text, card_paths, image_dir=N
             group_label = str(question.get("id") or question.get("title") or question_index + 1)
             for subquestion in question.get("question_ids", [group_label]):
                 group_map[str(subquestion)] = (group_key, group_label)
+    source_map, answer_map = _structured_alias_maps(
+        selected.get("exam", {}), selected.get("source_map", {}), selected.get("answer_map", {})
+    )
     report = _build_review_from_maps(
-        selected.get("source_map", {}),
-        selected.get("answer_map", {}),
+        source_map,
+        answer_map,
         {"exam": "结构化试卷", "section_count": summary.get("section_count", 0), "question_count": summary.get("question_count", 0), "total_score": summary.get("total_score", 0)},
         card_paths,
         image_dir=image_dir,
@@ -1371,6 +1433,15 @@ def build_review_from_structured(exam_text, answer_text, card_paths, image_dir=N
         template_config=template_config,
         card=card,
     )
+    metadata = _structured_question_metadata(selected.get("exam", {}))
+    for item in report.get("objective", []) + report.get("items", []):
+        item.update(metadata.get(str(item.get("question", "")), {}))
+    session_ids = [
+        item.get("session_id") for item in metadata.values()
+        if item.get("session_id") not in (None, "")
+    ]
+    if session_ids:
+        report["session_id"] = session_ids[0]
     report["paper_type"] = card.get("paper_type", "")
     report["paper_type_status"] = card.get("paper_type_status", "待复核")
     report["answer_paper_type"] = selected_type

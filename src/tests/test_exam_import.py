@@ -116,3 +116,64 @@ def test_import_keeps_independent_a_b_c_exam_and_answer_variants():
     assert imported["paper_variants"]["B"]["source_map"]["1"].startswith("B卷第1题")
     assert imported["paper_variants"]["C"]["source_map"]["1"].startswith("C卷第1题")
     assert imported["paper_variants"]["B"]["exam"]["sections"][0]["questions"][0]["score"] == 3
+
+
+def test_preserves_scout_native_ids_during_normalization():
+    from exam_import import normalize_exam_data
+
+    normalized = normalize_exam_data([{
+        "id": 13,
+        "session_id": 14,
+        "name": "一、单项选择题",
+        "questions": [{
+            "id": 78,
+            "section_id": 13,
+            "type": "single",
+            "title": "1. 题目",
+            "description": "A. 选项",
+            "score": 2,
+        }],
+    }])
+
+    section = normalized["sections"][0]
+    question = section["questions"][0]
+    assert section["id"] == 13
+    assert section["session_id"] == 14
+    assert question["id"] == 78
+    assert question["section_id"] == 13
+    assert question["session_id"] == 14
+
+
+def test_scout_local_answer_numbers_resolve_to_native_ids():
+    from exam_import import import_exam_and_answers
+
+    exam = [{
+        "id": 13,
+        "session_id": 14,
+        "name": "选择题",
+        "questions": [{
+            "id": 78,
+            "section_id": 13,
+            "type": "single",
+            "title": "1. 题目",
+            "description": "A. 选项",
+            "score": 2,
+        }, {
+            "id": 117,
+            "section_id": 18,
+            "type": "blank",
+            "title": "59. 题目",
+            "description": "填写内容",
+            "score": 1,
+        }],
+    }]
+    answers = {"answer_map": {"1": "C", "59": "double area = PI * r * r;"}}
+
+    imported = import_exam_and_answers(json.dumps(exam), json.dumps(answers))
+
+    assert imported["answer_map"] == {
+        "78": "C",
+        "117": "double area = PI * r * r;",
+    }
+    assert imported["summary"]["answer_count"] == 2
+    assert imported["summary"]["answer_missing"] == []

@@ -1,0 +1,30 @@
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONUTF8=1 \
+    PYTHONIOENCODING=utf-8 \
+    OMR_HOST=0.0.0.0 \
+    OMR_DATA_ROOT=/data
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        libgl1 \
+        libglib2.0-0 \
+        libgomp1 \
+        libsm6 \
+        libxext6 \
+        libxrender1 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt requirements.ocr.txt ./
+RUN python -m pip install --no-cache-dir --upgrade pip \
+    && python -m pip install --no-cache-dir -r requirements.ocr.txt
+
+COPY . .
+RUN mkdir -p /data /app/inputs /app/output
+
+EXPOSE 8765
+VOLUME ["/data"]
+
+CMD ["sh", "-c", "python scan_ui.py --host ${OMR_HOST} --port ${PORT:-8765}"]

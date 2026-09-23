@@ -12,3 +12,8 @@ outputs/*
 **/__pycache__
 venv/
 OMRChecker.wiki/
+# Generated verification and runtime artifacts
+/output/
+/tmp/
+/tmp_ref.png
+*.codex_*.bak

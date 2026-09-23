@@ -71,16 +71,33 @@ def _variant_answer_payload(payload):
     return payload
 
 
+def _local_question_ids(question):
+    """从题干提取答题卡题号，兼容 Scout 原生题目 ID。"""
+    title = str(question.get("title") or "")
+    ranged = _question_range(title)
+    if ranged:
+        return ranged
+    match = re.match(r"\s*(\d+)", title)
+    return [match.group(1)] if match else []
+
+
 def _merge_answer_values(exam, answer_values):
+    answer_values = {str(key): value for key, value in (answer_values or {}).items()}
     for section in exam["sections"]:
         for question in section["questions"]:
-            ids = question.get("question_ids", [question["id"]])
-            matched = {str(key): answer_values[str(key)] for key in ids if str(key) in answer_values}
-            if matched:
+            ids = [str(item) for item in question.get("question_ids", [question["id"]])]
+            local_ids = _local_question_ids(question)
+            resolved = {}
+            for index, question_id in enumerate(ids):
+                if question_id in answer_values:
+                    resolved[question_id] = answer_values[question_id]
+                elif index < len(local_ids) and local_ids[index] in answer_values:
+                    resolved[question_id] = answer_values[local_ids[index]]
+            if resolved:
                 if len(ids) == 1:
-                    question["answer"] = _normalize_answer(matched[str(ids[0])], question["type"])
+                    question["answer"] = _normalize_answer(resolved[ids[0]], question["type"])
                 else:
-                    question["answer"] = {key: _clean_text(value, 2000) for key, value in matched.items()}
+                    question["answer"] = {key: _clean_text(value, 2000) for key, value in resolved.items()}
     flat = answer_map(exam)
     summary = dict(exam["summary"])
     summary["answer_count"] = len(flat)
@@ -257,6 +274,8 @@ def normalize_exam_data(value, source_name="\u8bd5\u5377"):
         if not isinstance(questions, list):
             raise ValueError("\u7ae0\u8282 {} \u7684 questions \u9700\u8981\u662f\u6570\u7ec4".format(section.get("name", section_index + 1)))
         normalized_questions = []
+        native_section_id = section.get("id")
+        native_session_id = section.get("session_id")
         for question_index, question in enumerate(questions):
             if not isinstance(question, dict):
                 raise ValueError("\u7ae0\u8282 {} \u7b2c{}\u9898\u9700\u8981\u662f\u5bf9\u8c61".format(section.get("name", section_index + 1), question_index + 1))
@@ -271,8 +290,9 @@ def normalize_exam_data(value, source_name="\u8bd5\u5377"):
                 score = float(question.get("score", 0) or 0)
             except (TypeError, ValueError) as error:
                 raise ValueError("\u9898\u76ee {} \u7684 score \u9700\u8981\u662f\u6570\u5b57".format(title)) from error
-            normalized_questions.append({
-                "id": _clean_text(question.get("id") or question.get("number") or _question_number(title, question_index + 1), 80),
+            native_question_id = question.get("id")
+            normalized_question = {
+                "id": native_question_id if native_question_id is not None else _clean_text(question.get("number") or _question_number(title, question_index + 1), 80),
                 "type": question_type,
                 "title": title,
                 "score": int(score) if score.is_integer() else score,
@@ -281,39 +301,50 @@ def normalize_exam_data(value, source_name="\u8bd5\u5377"):
                 "answer": _normalize_answer(_answer_value(question), question_type),
                 **({"question_ids": [str(item) for item in question["question_ids"]]} if isinstance(question.get("question_ids"), list) else {}),
                 **({key: question[key] for key in ("analysis", "explanation", "reference", "tags", "score_map", "sub_scores") if key in question}),
-            })
+            }
+            if native_section_id is not None or "section_id" in question:
+                normalized_question["section_id"] = question.get("section_id", native_section_id)
+            if native_session_id is not None or "session_id" in question:
+                normalized_question["session_id"] = question.get("session_id", native_session_id)
+            normalized_questions.append(normalized_question)
             question_count += 1
             total_score += score
             type_counter[question_type] += 1
-        sections.append({
+        normalized_section = {
             "name": _clean_text(section.get("name"), 200),
             "description": _clean_text(section.get("description"), 5000),
             "sort_order": int(section.get("sort_order", section_index) or section_index),
             "total_score": section.get("total_score", sum(float(q["score"]) for q in normalized_questions)),
             "questions": normalized_questions,
-        })
+        }
+        if native_section_id is not None:
+            normalized_section["id"] = native_section_id
+        if native_session_id is not None:
+            normalized_section["session_id"] = native_session_id
+        sections.append(normalized_section)
     sections.sort(key=lambda item: item["sort_order"])
     next_number = 1
     for section in sections:
         section["questions"].sort(key=lambda item: item["sort_order"])
         for question in section["questions"]:
             explicit = question.get("question_ids")
+            question_identifier = str(question["id"])
             if explicit:
                 question_ids = [str(item) for item in explicit]
             else:
-                inferred_range = _question_range(question["id"], question["title"])
-                single_match = re.fullmatch(r"\d+", question["id"])
+                inferred_range = _question_range(question_identifier, question["title"])
+                single_match = re.fullmatch(r"\d+", question_identifier)
                 if inferred_range:
                     question_ids = inferred_range
                 elif single_match:
-                    number = int(question["id"])
+                    number = int(question_identifier)
                     markers = sorted(set(re.findall(r"\*+\s*\((\d+)\)", question["description"])), key=int)
                     question_ids = ["{}({})".format(number, marker) for marker in markers] if number >= 61 and markers else [str(number)]
-                elif len(question["id"]) == 1 and question["id"].isalpha() and question["type"] == "essay":
+                elif len(question_identifier) == 1 and question_identifier.isalpha() and question["type"] == "essay":
                     size = max(1, int(float(question["score"])))
                     question_ids = [str(number) for number in range(next_number, next_number + size)]
                 else:
-                    question_ids = [question["id"]]
+                    question_ids = [question_identifier]
             question["question_ids"] = question_ids
             numeric_ids = [int(re.match(r"\d+", key).group()) for key in question_ids if re.match(r"\d+", key)]
             if numeric_ids:

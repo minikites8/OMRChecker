@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: omrchecker
+      POSTGRES_USER: omrchecker
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U omrchecker -d omrchecker"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile.backend
+    environment:
+      OMR_HOST: 0.0.0.0
+      OMR_DATA_ROOT: /data
+      OMR_AUTH_MODE: ${OMR_AUTH_MODE:-oidc_or_builtin}
+      OMR_PERSISTENCE_MODE: ${OMR_PERSISTENCE_MODE:-postgres_cos}
+      OMR_SESSION_SECRET: ${OMR_SESSION_SECRET:?set OMR_SESSION_SECRET}
+      OMR_PUBLIC_BASE_URL: ${OMR_PUBLIC_BASE_URL:-http://localhost:8765}
+      OMR_BOOTSTRAP_ADMIN_EMAIL: ${OMR_BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}
+      OMR_BOOTSTRAP_ADMIN_PASSWORD: ${OMR_BOOTSTRAP_ADMIN_PASSWORD:-}
+      DATABASE_URL: postgresql://omrchecker:${POSTGRES_PASSWORD}@postgres:5432/omrchecker
+      FRONTEND_ORIGINS: ${FRONTEND_ORIGINS:-http://localhost:8765}
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-http://localhost:8765/auth/oidc/callback}
+      OIDC_SCOPES: ${OIDC_SCOPES:-openid profile email}
+      OIDC_DEFAULT_ROLE: ${OIDC_DEFAULT_ROLE:-teacher}
+      TENCENT_COS_SECRET_ID: ${TENCENT_COS_SECRET_ID:-}
+      TENCENT_COS_SECRET_KEY: ${TENCENT_COS_SECRET_KEY:-}
+      TENCENT_COS_REGION: ${TENCENT_COS_REGION:-}
+      TENCENT_COS_BUCKET: ${TENCENT_COS_BUCKET:-}
+      TENCENT_COS_APPID: ${TENCENT_COS_APPID:-}
+      TENCENT_COS_PREFIX: ${TENCENT_COS_PREFIX:-omrchecker}
+    volumes:
+      - omr-data:/data
+      - ../inputs:/app/inputs
+      - ../output:/app/output
+    depends_on:
+      postgres:
+        condition: service_healthy
+    expose:
+      - "8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "8765:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  omr-data:
