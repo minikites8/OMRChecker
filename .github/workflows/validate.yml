@@ -48,12 +48,23 @@ jobs:
       - name: Backend import smoke test
         run: python -c "import backend.app; print('BACKEND_IMPORT_OK', backend.app.app.title)"
 
-      - name: Scan UI self test
+      - name: FastAPI health and session smoke test
         env:
           OMR_AUTH_MODE: disabled
           OMR_PERSISTENCE_MODE: local
           OMR_DATA_ROOT: ${{ runner.temp }}/omrchecker-data
-        run: python scan_ui.py --self-test
+        run: |
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          from backend.app import app
+
+          client = TestClient(app)
+          health = client.get("/api/health")
+          session = client.get("/api/session")
+          assert health.status_code == 200 and health.json()["ok"]
+          assert session.status_code == 200 and session.json()["authenticated"]
+          print("API_SMOKE_OK", health.status_code, session.status_code)
+          PY
 
       - name: Frontend tests
         run: |
