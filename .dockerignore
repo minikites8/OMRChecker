@@ -7,3 +7,8 @@ outputs/
 tmp/
 *.pyc
 *.bak
+
+# Keep saved service credentials out of build contexts
+data/
+**/platform-settings.json
+**/platform-settings.json.lock

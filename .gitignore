@@ -17,3 +17,8 @@ OMRChecker.wiki/
 /tmp/
 /tmp_ref.png
 *.codex_*.bak
+
+# Persisted administrator settings and credentials
+/data/
+**/platform-settings.json
+**/platform-settings.json.lock

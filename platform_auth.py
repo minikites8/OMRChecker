@@ -108,6 +108,7 @@ class AuthService:
             "role": str(user.get("role", "teacher")),
             "auth_provider": str(user.get("auth_provider", "")),
             "exp": int(time.time()) + self.settings.session_ttl_seconds,
+            "session_version": int(user.get("session_version", 0)),
         }
         return self.cookie_header(
             SESSION_COOKIE,
@@ -123,7 +124,14 @@ class AuthService:
         if not self.enabled:
             return {"id": "local", "email": "local@localhost", "display_name": "本地用户", "role": "admin", "auth_provider": "local"}
         payload = self._unpack(_parse_cookie(cookie_header, SESSION_COOKIE))
-        return payload
+        if not payload or not payload.get("sub"):
+            return None
+        user = self.database.find_user_by_id(str(payload["sub"]))
+        if not user or not user.get("is_active"):
+            return None
+        if payload.get("session_version", 0) != user.get("session_version", 0):
+            return None
+        return {**user, "sub": str(user["id"])}
 
     def login_builtin(self, email: str, password: str) -> dict:
         if not self.settings.builtin_enabled:
@@ -208,13 +216,16 @@ class AuthService:
         if not subject or not email:
             raise AuthError("OIDC 用户缺少 sub 或 email claim")
         display_name = str(claims.get("name") or claims.get("preferred_username") or email).strip()
-        return dict(self.database.upsert_oidc_user(
+        user = dict(self.database.upsert_oidc_user(
             self.settings.oidc_issuer_url,
             subject,
             email,
             display_name,
             self.settings.default_oidc_role,
         ))
+        if not user.get("is_active"):
+            raise AuthError("账号已停用，请联系管理员")
+        return user
 
     def _verify_id_token(self, token: str, nonce: str, discovery: dict) -> Optional[dict]:
         if not token:

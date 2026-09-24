@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS app_users (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE (oidc_issuer, oidc_subject)
 );
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS session_version INTEGER NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS platform_artifacts (
     id TEXT PRIMARY KEY,
     owner_user_id TEXT,
@@ -205,3 +206,96 @@ class PostgresStore:
                 (uuid.uuid4().hex, actor_user_id or None, action, resource_type, resource_id,
                  __import__("json").dumps(details, ensure_ascii=False)),
             )
+
+    def find_user_by_id(self, user_id: str) -> Optional[dict]:
+        with self.connection() as connection:
+            return connection.execute("SELECT * FROM app_users WHERE id=%s", (user_id,)).fetchone()
+
+    def admin_overview(self) -> dict:
+        with self.connection() as connection:
+            return connection.execute("""SELECT
+                (SELECT COUNT(*) FROM app_users) AS users,
+                (SELECT COUNT(*) FROM app_users WHERE is_active) AS active_users,
+                (SELECT COUNT(*) FROM app_users WHERE is_active AND role='admin') AS admins,
+                (SELECT COUNT(*) FROM platform_jobs) AS jobs,
+                (SELECT COUNT(*) FROM platform_artifacts) AS artifacts,
+                (SELECT COALESCE(SUM(size_bytes),0) FROM platform_artifacts) AS storage_bytes""").fetchone()
+
+    def admin_list_users(self, page, size, search="", role="", active="") -> dict:
+        # Escape LIKE metacharacters so search text stays literal.
+        term = "%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        where = "WHERE (email ILIKE %s OR display_name ILIKE %s)"
+        params = [term, term]
+        if role:
+            where += " AND role=%s"
+            params.append(role)
+        if active:
+            where += " AND is_active=%s"
+            params.append(active == "true")
+        with self.connection() as connection:
+            total = connection.execute("SELECT COUNT(*) AS total FROM app_users " + where, params).fetchone()["total"]
+            rows = connection.execute(
+                "SELECT id,email,display_name,role,auth_provider,is_active,created_at,updated_at FROM app_users "
+                + where + " ORDER BY created_at DESC,id LIMIT %s OFFSET %s", params + [size, (page - 1) * size],
+            ).fetchall()
+        return {"total": total, "items": rows}
+
+    def admin_list_audit(self, page, size) -> dict:
+        with self.connection() as connection:
+            total = connection.execute("SELECT COUNT(*) AS total FROM platform_audit_events").fetchone()["total"]
+            rows = connection.execute("""SELECT e.id,e.actor_user_id,u.email AS actor_email,e.action,
+                e.resource_type,e.resource_id,e.details,e.created_at
+                FROM platform_audit_events e LEFT JOIN app_users u ON u.id=e.actor_user_id
+                ORDER BY e.created_at DESC,e.id LIMIT %s OFFSET %s""", (size, (page - 1) * size)).fetchall()
+        return {"total": total, "items": rows}
+
+    def admin_save_user(self, actor_id, user_id, values) -> dict:
+        from platform_admin import AdminError
+        import json
+        with self.connection() as connection:
+            # Serialize account changes, including the final-admin invariant.
+            connection.execute("LOCK TABLE app_users IN SHARE ROW EXCLUSIVE MODE")
+            actor = connection.execute("SELECT * FROM app_users WHERE id=%s", (actor_id,)).fetchone()
+            if not actor or not actor["is_active"] or actor["role"] != "admin":
+                raise AdminError(403, "管理员身份已更新，请重新登录")
+            if user_id is None:
+                duplicate = connection.execute("SELECT id FROM app_users WHERE lower(email)=lower(%s)", (values["email"],)).fetchone()
+                if duplicate:
+                    raise AdminError(409, "该邮箱已被使用")
+                user_id = uuid.uuid4().hex
+                row = connection.execute("""INSERT INTO app_users
+                    (id,email,display_name,role,auth_provider,password_hash)
+                    VALUES (%s,%s,%s,%s,'builtin',%s) RETURNING *""",
+                    (user_id, values["email"], values["display_name"], values["role"], values["password_hash"]),
+                ).fetchone()
+                action = "admin.user.create"
+            else:
+                current = connection.execute("SELECT * FROM app_users WHERE id=%s", (user_id,)).fetchone()
+                if not current:
+                    raise AdminError(404, "账号不存在")
+                role = values.get("role", current["role"])
+                active = values.get("is_active", current["is_active"])
+                if actor_id == user_id and (role != "admin" or not active):
+                    raise AdminError(409, "请保留当前管理员账号的角色与启用状态")
+                if current["role"] == "admin" and current["is_active"] and (role != "admin" or not active):
+                    count = connection.execute("SELECT COUNT(*) AS total FROM app_users WHERE role='admin' AND is_active=TRUE").fetchone()["total"]
+                    if count <= 1:
+                        raise AdminError(409, "系统须保留至少一个启用的管理员")
+                if "password_hash" in values and current["auth_provider"] != "builtin":
+                    raise AdminError(409, "OIDC 账号的密码由身份提供方管理")
+                columns = [key for key in ("display_name", "role", "is_active", "password_hash") if key in values]
+                assignments = [key + "=%s" for key in columns]
+                # Reset passwords and disable/enable transitions revoke existing cookies.
+                if "password_hash" in values or ("is_active" in values and values["is_active"] != current["is_active"]):
+                    assignments.append("session_version=session_version+1")
+                assignments.append("updated_at=NOW()")
+                row = connection.execute("UPDATE app_users SET " + ",".join(assignments) + " WHERE id=%s RETURNING *",
+                                         [values[key] for key in columns] + [user_id]).fetchone()
+                action = "admin.user.update"
+            details = {"email": row["email"], "role": row["role"], "is_active": row["is_active"],
+                       "changed_fields": ["password" if key == "password_hash" else key for key in values]}
+            connection.execute("""INSERT INTO platform_audit_events
+                (id,actor_user_id,action,resource_type,resource_id,details)
+                VALUES (%s,%s,%s,'user',%s,%s::jsonb)""",
+                (uuid.uuid4().hex, actor_id, action, user_id, json.dumps(details, ensure_ascii=False)))
+            return row

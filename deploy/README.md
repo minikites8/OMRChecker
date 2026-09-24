@@ -53,3 +53,12 @@ docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 3. 将批量批改与 AI 判分拆成独立 Worker，使用 Redis 保存任务队列和进度。
 4. 将文件下载改成 COS 预签名 URL，前端通过短期链接读取对象。
 5. 为考试、试卷、答题卡、成绩和复核操作补充租户权限与审计策略。
+
+
+### 管理面板配置覆盖
+
+管理员可在「管理面板 → 服务参数配置」保存 AI、OCR、并发、身份验证、数据库、COS、监听地址和端口等 37 项服务参数。保存值优先于容器环境变量，选择恢复环境/默认值即可移除覆盖。
+
+默认配置文件 `/data/platform-settings.json` 使用现有 `omr-data` 卷持久化；变更配置文件位置使用启动变量 `OMR_SETTINGS_FILE`，并把对应目录挂载到持久卷。该文件包含服务凭据，请为目录设置合适的访问权限与备份策略。
+
+AI 与默认 OCR 参数对后续任务即时生效。页面标记为重启生效的参数，在 `docker compose restart backend` 后应用。Dockerfile 通过 `python -m backend.main` 读取保存的监听配置；调整后端端口时同步更新 Nginx upstream 与容器网络配置。

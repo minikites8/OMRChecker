@@ -25,4 +25,4 @@ RUN mkdir -p /data /app/inputs /app/output
 
 EXPOSE 8000
 VOLUME ["/data"]
-CMD ["sh", "-c", "uvicorn backend.app:app --host ${OMR_HOST} --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]
+CMD ["python", "-m", "backend.main"]

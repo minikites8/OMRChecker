@@ -26,7 +26,7 @@ def test_platform_views_and_unique_controls():
     page = Page((UI_ROOT / "index.html").read_text(encoding="utf-8"))
     assert len(page.ids) == len(set(page.ids))
     assert page.views == [("dashboard", False), ("papers", True), ("candidates", True), ("grading", True),
-                          ("results", True), ("sheets", True), ("templates", True), ("scanner", True)]
+                          ("results", True), ("sheets", True), ("templates", True), ("scanner", True), ("admin", True)]
     assert page.scripts[0].startswith("/static/platform.js")
     assert page.scripts[-1].startswith("/static/app.js")
 

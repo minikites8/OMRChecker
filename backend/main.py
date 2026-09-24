@@ -1,6 +1,6 @@
 """ASGI entrypoint for production deployment."""
 
-import os
+from runtime_settings import get_setting
 
 import uvicorn
 
@@ -8,8 +8,8 @@ import uvicorn
 if __name__ == "__main__":
     uvicorn.run(
         "backend.app:app",
-        host=os.environ.get("OMR_HOST", "0.0.0.0"),
-        port=int(os.environ.get("PORT", "8000")),
+        host=get_setting("OMR_HOST", "0.0.0.0"),
+        port=int(get_setting("PORT", "8000")),
         proxy_headers=True,
         forwarded_allow_ips="*",
     )

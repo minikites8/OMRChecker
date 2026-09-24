@@ -9,6 +9,7 @@ import numpy as np
 
 from src.logger import logger
 from recognition_config import resolve_local_ocr_enabled
+from runtime_settings import get_setting
 
 
 @dataclass(frozen=True)
@@ -63,7 +64,7 @@ class PaddleTextRecognizer:
 
     def _load_model(self):
         if config_value(self.ocr_params, "skip_model_source_check", True):
-            os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+            os.environ["PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK"] = get_setting("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
         try:
             from paddleocr import TextRecognition
         except ImportError as error:

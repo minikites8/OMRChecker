@@ -29,14 +29,16 @@ from recognition_config import recognition_settings
 from exam_import import import_exam_and_answers
 from exam_review import apply_ai_review, apply_manual_review, attach_structured_scores, build_review_from_structured, refresh_rule_judgments, _import_variant_for_review as exam_review_variant_for_review
 from scan_templates import TemplateManager
+from platform_admin import AdminError, AdminService, require_admin
 from platform_auth import AuthError, AuthService
 from platform_config import PlatformSettings
+from runtime_settings import get_setting
 from platform_cos import TencentCosStorage
 from platform_database import PostgresStore
 from platform_persistence import PlatformPersistence
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DATA_ROOT = Path(os.environ.get("OMR_DATA_ROOT") or PROJECT_ROOT).expanduser().resolve()
+DATA_ROOT = Path(get_setting("OMR_DATA_ROOT", str(PROJECT_ROOT))).expanduser().resolve()
 UI_ROOT = PROJECT_ROOT / "ui"
 TEMPLATE_ROOT = PROJECT_ROOT / "inputs" / "phone_scan"
 TEMPLATE_MANAGER = TemplateManager(
@@ -54,8 +56,8 @@ PLATFORM_COS = TencentCosStorage(PLATFORM_SETTINGS)
 PLATFORM_PERSISTENCE = PlatformPersistence(PLATFORM_SETTINGS, PLATFORM_DATABASE, PLATFORM_COS)
 AUTH_SERVICE = AuthService(PLATFORM_SETTINGS, PLATFORM_DATABASE)
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf"}
-MAX_REQUEST_BYTES = 256 * 1024 * 1024
-MAX_FILE_BYTES = 24 * 1024 * 1024
+MAX_REQUEST_BYTES = int(get_setting("OMR_MAX_REQUEST_MB", "256")) * 1024 * 1024
+MAX_FILE_BYTES = int(get_setting("OMR_MAX_FILE_MB", "24")) * 1024 * 1024
 EXAM_IMPORT_LOCK = threading.RLock()
 AI_REVIEW_LOCK = threading.RLock()
 BATCH_REVIEW_LOCK = threading.RLock()
@@ -65,7 +67,7 @@ BATCH_REVIEW_WORKERS = {}
 
 def _configured_workers(name, default, maximum=4):
     try:
-        value = int(os.environ.get(name, default))
+        value = int(get_setting(name, default))
     except (TypeError, ValueError):
         value = default
     return max(1, min(maximum, value))
@@ -148,7 +150,7 @@ def decode_upload(file_object):
     if not payload:
         raise ValueError("图片内容为空")
     if len(payload) > MAX_FILE_BYTES:
-        raise ValueError("单个文件大小上限为 24 MB")
+        raise ValueError("单个文件超过配置的大小上限")
     return payload
 
 
@@ -1046,11 +1048,51 @@ class ScanUIHandler(BaseHTTPRequestHandler):
         content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
         self.send_bytes(200, path.read_bytes(), content_type)
 
+    def _admin_request(self, method):
+        parsed = urlparse(self.path)
+        try:
+            require_admin(AUTH_SERVICE, self.headers.get("Cookie", ""))
+            payload = None
+            if method in {"POST", "PATCH"}:
+                if self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
+                    raise AdminError(415, "请使用 application/json")
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                except ValueError:
+                    raise AdminError(400, "请求长度格式错误")
+                limit = 65536 if parsed.path == "/api/admin/settings" else 16384
+                if length < 0 or length > limit:
+                    raise AdminError(413, f"管理请求上限为 {limit // 1024} KB")
+                try:
+                    payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                except (ValueError, UnicodeError):
+                    raise AdminError(400, "JSON 格式错误")
+            result = AdminService(PLATFORM_SETTINGS, PLATFORM_DATABASE, AUTH_SERVICE).execute(
+                method, parsed.path, self.headers.get("Cookie", ""),
+                {key: values[-1] for key, values in parse_qs(parsed.query).items()}, payload,
+            )
+            # PostgreSQL timestamps are serialized identically by both deployments.
+            from fastapi.encoders import jsonable_encoder
+            self.send_json(200, jsonable_encoder(result), {"Cache-Control": "no-store"})
+        except AdminError as error:
+            self.send_json(error.status, {"ok": False, "error": str(error)}, {"Cache-Control": "no-store"})
+        except Exception:
+            self.send_json(503, {"ok": False, "error": "管理服务暂时繁忙，请稍后重试"}, {"Cache-Control": "no-store"})
+
+    def do_PATCH(self):
+        if urlparse(self.path).path.startswith("/api/admin/"):
+            self._admin_request("PATCH")
+        else:
+            self.send_json(404, {"ok": False, "error": "接口不存在"})
+
     def do_GET(self):
         parsed = urlparse(self.path)
         route = parsed.path
+        if route.startswith("/api/admin/"):
+            self._admin_request("GET")
+            return
         try:
-            if route == "/login":
+            if route in {"/login", "/login.html"}:
                 self.send_file(UI_ROOT / "login.html")
             elif route == "/auth/oidc/start":
                 url, state_cookie = AUTH_SERVICE.begin_oidc(self._oidc_redirect_uri())
@@ -1132,6 +1174,9 @@ class ScanUIHandler(BaseHTTPRequestHandler):
             self.send_json(400, {"ok": False, "error": str(error)})
     def do_POST(self):
         route = urlparse(self.path).path
+        if route.startswith("/api/admin/"):
+            self._admin_request("POST")
+            return
         if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/exam/import", "/api/exam/delete", "/api/review", "/api/review/batch", "/api/review/ai-judge", "/api/review/confirm", "/api/review/confirm-grade", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
             self.send_json(404, {"ok": False, "error": "接口不存在"})
             return
@@ -1140,7 +1185,7 @@ class ScanUIHandler(BaseHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if length > MAX_REQUEST_BYTES:
-                raise ValueError("本次上传大小上限为 256 MB")
+                raise ValueError("本次上传超过配置的总量上限")
             raw = self.rfile.read(length)
             payload = json.loads(raw.decode("utf-8")) if raw else {}
             if route == "/api/auth/login":
@@ -1268,7 +1313,7 @@ def self_test():
 
 
 def _configured_port():
-    value = os.environ.get("PORT", os.environ.get("OMR_PORT", "8765"))
+    value = get_setting("OMR_PORT", "8765")
     try:
         return max(0, min(65535, int(value)))
     except (TypeError, ValueError):
@@ -1277,7 +1322,7 @@ def _configured_port():
 
 def parse_args():
     parser = argparse.ArgumentParser(description="OMRChecker 试卷自动批改平台")
-    parser.add_argument("--host", default=os.environ.get("OMR_HOST", "127.0.0.1"))
+    parser.add_argument("--host", default=get_setting("OMR_HOST", "127.0.0.1"))
     parser.add_argument(
         "--port",
         type=int,

@@ -9,10 +9,15 @@ from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.encoders import jsonable_encoder
+from starlette.concurrency import run_in_threadpool
+from platform_admin import AdminError, AdminService, require_admin
+
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 
 from platform_auth import AuthError, AuthService
 from platform_config import PlatformSettings
+from runtime_settings import get_setting
 from platform_cos import TencentCosStorage
 from platform_database import PostgresStore
 from platform_persistence import PlatformPersistence
@@ -27,7 +32,7 @@ persistence = PlatformPersistence(settings, database, cos)
 auth = AuthService(settings, database)
 
 app = FastAPI(title="OMRChecker API", version="0.1.0")
-origins = [item.strip() for item in os.environ.get("FRONTEND_ORIGINS", "http://localhost:8765").split(",") if item.strip()]
+origins = [item.strip() for item in get_setting("FRONTEND_ORIGINS", "http://localhost:8765").split(",") if item.strip()]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -139,6 +144,91 @@ def logout() -> RedirectResponse:
     response = RedirectResponse("/login", status_code=302)
     response.headers["Set-Cookie"] = auth.clear_session_cookie()
     return response
+
+
+def admin_result(request: Request, payload=None) -> JSONResponse:
+    try:
+        result = AdminService(settings, database, auth).execute(
+            request.method, request.url.path, request.headers.get("cookie", ""),
+            dict(request.query_params), payload,
+        )
+        return JSONResponse(jsonable_encoder(result), headers={"Cache-Control": "no-store"})
+    except AdminError as error:
+        return JSONResponse({"ok": False, "error": str(error)}, status_code=error.status, headers={"Cache-Control": "no-store"})
+    except Exception:
+        return JSONResponse({"ok": False, "error": "管理服务暂时繁忙，请稍后重试"}, status_code=503, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/admin/settings", tags=["admin"])
+@app.get("/api/admin/overview", tags=["admin"])
+@app.get("/api/admin/users", tags=["admin"])
+@app.get("/api/admin/audit-events", tags=["admin"])
+def admin_read(request: Request):
+    return admin_result(request)
+
+
+async def admin_write(request: Request):
+    try:
+        await run_in_threadpool(require_admin, auth, request.headers.get("cookie", ""))
+        if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
+            raise AdminError(415, "请使用 application/json")
+        limit = 65536 if request.url.path == "/api/admin/settings" else 16384
+        raw = bytearray()
+        async for chunk in request.stream():
+            raw.extend(chunk)
+            if len(raw) > limit:
+                raise AdminError(413, f"管理请求上限为 {limit // 1024} KB")
+        import json
+        try:
+            payload = json.loads(raw)
+        except (ValueError, UnicodeError):
+            raise AdminError(400, "JSON 格式错误")
+        return await run_in_threadpool(admin_result, request, payload)
+    except AdminError as error:
+        return JSONResponse({"ok": False, "error": str(error)}, status_code=error.status, headers={"Cache-Control": "no-store"})
+    except Exception:
+        return JSONResponse({"ok": False, "error": "管理服务暂时繁忙，请稍后重试"}, status_code=503, headers={"Cache-Control": "no-store"})
+
+
+ADMIN_USER_PROPERTIES = {
+    "email": {"type": "string", "format": "email", "maxLength": 254},
+    "display_name": {"type": "string", "maxLength": 80},
+    "role": {"type": "string", "enum": ["admin", "teacher"]},
+    "is_active": {"type": "boolean"},
+    "password": {"type": "string", "minLength": 12, "maxLength": 128, "writeOnly": True},
+}
+
+
+def admin_body_schema(creating=False):
+    fields = ("email", "display_name", "role", "password") if creating else ("display_name", "role", "is_active", "password")
+    schema = {"type": "object", "additionalProperties": False,
+              "properties": {key: ADMIN_USER_PROPERTIES[key] for key in fields}}
+    if creating:
+        schema["required"] = ["email", "password"]
+    else:
+        schema["minProperties"] = 1
+    return {"requestBody": {"required": True, "content": {"application/json": {"schema": schema}}}}
+
+
+@app.post("/api/admin/users", tags=["admin"], openapi_extra=admin_body_schema(True))
+async def admin_create_user(request: Request):
+    return await admin_write(request)
+
+
+@app.patch("/api/admin/users/{user_id}", tags=["admin"], openapi_extra=admin_body_schema())
+async def admin_update_user(user_id: str, request: Request):
+    return await admin_write(request)
+
+
+@app.patch("/api/admin/settings", tags=["admin"], openapi_extra={
+    "requestBody": {"required": True, "content": {"application/json": {"schema": {
+        "type": "object", "required": ["revision"], "additionalProperties": False,
+        "properties": {"revision": {"type": "integer", "minimum": 0},
+                       "values": {"type": "object", "description": "Changed settings; secret values are write-only."},
+                       "reset": {"type": "array", "items": {"type": "string"}}}
+    }}}}})
+async def admin_update_settings(request: Request):
+    return await admin_write(request)
 
 
 @app.get("/api/templates")

@@ -1,10 +1,10 @@
 """Per-task text-recognition routing, shared by review and scanner workers."""
-import os
+from runtime_settings import get_setting
 
 
 def resolve_local_ocr_enabled(value=None):
     if value is None:
-        value = os.environ.get("OMR_LOCAL_OCR_ENABLED", "true")
+        value = get_setting("OMR_LOCAL_OCR_ENABLED", "true")
     if isinstance(value, bool):
         return value
     if isinstance(value, str):

@@ -8,6 +8,7 @@ import math
 import tempfile
 from types import SimpleNamespace
 import os
+from runtime_settings import get_setting, get_settings_store, resolve_value, text_value
 import re
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -24,29 +25,22 @@ _AI_PRINT_LOCK = threading.Lock()
 
 
 def _env_value(*names, default=""):
-    for name in names:
-        value = os.environ.get(name, "").strip()
-        if value:
-            return value
-    return default
+    return get_setting(names[0], default).strip()
 
 
 def ai_config():
-    endpoint = _env_value(
-        "HANDWRITING_AI_ENDPOINT",
-        "OPENAI_CHAT_COMPLETIONS_URL",
-        default=DEFAULT_ENDPOINT,
-    )
-    model = _env_value("HANDWRITING_AI_MODEL", "OPENAI_MODEL", default=DEFAULT_MODEL)
-    api_key = _env_value("HANDWRITING_AI_API_KEY", "OPENAI_API_KEY")
-    timeout = _env_value("HANDWRITING_AI_TIMEOUT", default="180")
-    concurrency = _env_value("HANDWRITING_AI_CONCURRENCY", default="3")
+    # Read endpoint, model and credentials from one atomic settings revision.
+    values = get_settings_store().read()["values"]
+    value = lambda key, default: text_value(resolve_value(key, values, default)[0]).strip()
+    endpoint = value("HANDWRITING_AI_ENDPOINT", DEFAULT_ENDPOINT)
+    model = value("HANDWRITING_AI_MODEL", DEFAULT_MODEL)
+    api_key = value("HANDWRITING_AI_API_KEY", "")
     try:
-        timeout_seconds = max(10, min(300, int(timeout)))
+        timeout_seconds = max(10, min(300, int(value("HANDWRITING_AI_TIMEOUT", "180"))))
     except ValueError:
         timeout_seconds = 180
     try:
-        concurrency_count = max(1, min(8, int(concurrency)))
+        concurrency_count = max(1, min(8, int(value("HANDWRITING_AI_CONCURRENCY", "3"))))
     except ValueError:
         concurrency_count = 3
     return {

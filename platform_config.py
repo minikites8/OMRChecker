@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import os
+from runtime_settings import get_setting
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +13,7 @@ _ALLOWED_PERSISTENCE_MODES = {"local", "postgres_cos"}
 
 
 def _env(name: str, default: str = "") -> str:
-    return os.environ.get(name, default).strip()
+    return get_setting(name, default).strip()
 
 
 def _int_env(name: str, default: int, minimum: int, maximum: int) -> int:

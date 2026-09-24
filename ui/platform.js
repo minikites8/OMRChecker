@@ -2,6 +2,7 @@
 (function () {
   'use strict';
   const views = {
+    admin: ['管理面板', '管理平台账号、访问权限与操作记录。', '系统管理'],
     dashboard: ['工作台', '从试卷导入到成绩复核，让批改更有条理。', '教学工作台'],
     papers: ['试卷管理', '管理结构化试卷与参考答案，建立统一批改标准。', '教学管理'],
     candidates: ['考生管理', '对照姓名原图确认考生信息，按姓名或学号查找答卷。', '教学管理'],
@@ -57,7 +58,9 @@
   }
   function renderRoute(focus) {
     if (location.hash === '#workspaceMain') { $('workspaceMain').focus(); return; }
-    const active = route(location.hash), [title, description, eyebrow] = views[active];
+    const requested = route(location.hash);
+    const active = requested === 'admin' && window.omrSession?.user?.role !== 'admin' ? 'dashboard' : requested;
+    const [title, description, eyebrow] = views[active];
     document.querySelectorAll('[data-view]').forEach(view => { view.hidden = view.dataset.view !== active; });
     document.querySelectorAll('[data-nav]').forEach(link => {
       const selected = link.dataset.nav === active;
@@ -78,6 +81,12 @@
   }
   window.platform = { navigate, confirmSwitch: () => !model.dirty || window.confirm('当前复核修改尚未保存，确认切换试卷？') };
   window.addEventListener('hashchange', () => renderRoute(true));
+  window.addEventListener('platform:session', event => {
+    const admin = event.detail?.user?.role === 'admin';
+    $('adminNav').hidden = !admin;
+    if (!admin && location.hash === '#admin') history.replaceState(null, '', '#dashboard');
+    renderRoute(false);
+  });
   $('menuToggle').addEventListener('click', () => {
     const open = document.body.classList.toggle('nav-open');
     $('menuToggle').setAttribute('aria-expanded', String(open));
