@@ -19,9 +19,10 @@ import cv2
 import fitz
 import numpy as np
 
-from ai_judge import _clean_visual_text, judge_handwritten_items
+from ai_judge import AI_REVIEW_POLICY, _clean_visual_text, judge_handwritten_items
 from answer_alignment import align_printed_region
 from candidate_identity import IDENTITY_FIELDS, prepare_name_crop, name_fields
+from recognition_config import recognition_settings, resolve_local_ocr_enabled
 
 PAGE_W = 595.2756
 PAGE_H = 841.8898
@@ -695,14 +696,16 @@ def _split_handwriting_lines(image):
     return lines
 
 
-def _recognize_crops(crops, labels):
+def _recognize_crops(crops, labels, local_ocr_enabled=None):
     if not crops:
         return []
+    local_ocr_enabled = resolve_local_ocr_enabled(local_ocr_enabled)
     try:
         from src.ocr import create_text_recognizer
         params = SimpleNamespace(
             enabled=True,
             provider="paddleocr",
+            local_ocr_enabled=local_ocr_enabled,
             model_name="PP-OCRv6_medium_rec",
             device="cpu",
             batch_size=7,
@@ -713,13 +716,14 @@ def _recognize_crops(crops, labels):
             field_charsets={},
             skip_model_source_check=True,
         )
-        recognizer = getattr(_OCR_THREAD_LOCAL, "recognizer", None)
+        cache_key = "recognizer" if local_ocr_enabled else "ai_recognizer"
+        recognizer = getattr(_OCR_THREAD_LOCAL, cache_key, None)
         if recognizer is None:
             recognizer = create_text_recognizer(params)
-            _OCR_THREAD_LOCAL.recognizer = recognizer
+            setattr(_OCR_THREAD_LOCAL, cache_key, recognizer)
         batch_images, batch_labels, spans = [], [], []
         for crop, label in zip(crops, labels):
-            lines = _split_handwriting_lines(crop) if label in {"64思路", "64代码"} else [crop]
+            lines = _split_handwriting_lines(crop) if local_ocr_enabled and label in {"64思路", "64代码"} else [crop]
             start = len(batch_images)
             batch_images.extend(lines)
             batch_labels.extend([label] * len(lines))
@@ -889,6 +893,8 @@ def _save_objective_crops(image, destination, region_images=None):
 
 def extract_answer_card(card_paths, image_dir=None, template_config=None):
     template_config = dict(template_config or {})
+    settings = recognition_settings(template_config.get("local_ocr_enabled"))
+    local_ocr = settings["local_ocr_enabled"]
     material_mode = str(template_config.get("material_mode") or "grouped_61_63")
     answer_card_layout = str(template_config.get("layout") or "16th_abc_61_63_fill_64_algorithm")
     pages = []
@@ -1034,9 +1040,17 @@ def extract_answer_card(card_paths, image_dir=None, template_config=None):
                 crop_paths[label] = str(path)
     name_crop, name_ratio = prepare_name_crop(normalized[0], image_dir)
     has_name_ink = name_ratio >= 0.006
-    results = _recognize_crops(crops + ([name_crop] if has_name_ink else []),
-                               labels + (["姓名"] if has_name_ink else []))
+    if not local_ocr and image_dir is not None and has_name_ink:
+        name_crop = cv2.imdecode(np.frombuffer(
+            (Path(image_dir) / "identity" / "name.png").read_bytes(), np.uint8), cv2.IMREAD_GRAYSCALE)
+    recognition_crops = (crops if local_ocr else display_crops) + ([name_crop] if has_name_ink else [])
+    recognition_labels = labels + (["姓名"] if has_name_ink else [])
+    # Keep the default call compatible with custom local recognizers.
+    results = (_recognize_crops(recognition_crops, recognition_labels)
+               if local_ocr and resolve_local_ocr_enabled() else
+               _recognize_crops(recognition_crops, recognition_labels, local_ocr_enabled=local_ocr))
     identity = name_fields(results.pop() if has_name_ink else None, name_ratio)
+    identity["student_name_source"] = "ocr" if local_ocr else "ai"
     text_fields = {}
     errors = []
     for label, result, ink_ratio in zip(labels, results, ink_ratios):
@@ -1051,6 +1065,7 @@ def extract_answer_card(card_paths, image_dir=None, template_config=None):
     text_fields["64"] = {"text": "\n".join(long_texts), "confidence": max(long_confidences, default=0.0)}
     paper_type = paper_type if normalized else ""
     return {
+        **settings,
         "student_id": student_id if normalized else "",
         **identity,
         "paper_type": paper_type,
@@ -1301,6 +1316,18 @@ def refresh_rule_judgments(review):
         if not any(key in item for key in ("expected_answer", "recognized_text", "auto_status")):
             continue
         eligible = True
+        if (
+            _is_correction_question(item.get("question"))
+            and item.get("ai_status") in {"AI通过", "AI不通过", "AI需复核"}
+            and item.get("ai_review_policy") not in {AI_REVIEW_POLICY, "pending-" + AI_REVIEW_POLICY}
+            and item.get("manual_status") not in {"通过", "不通过"}
+            and not review.get("grade_confirmed")
+        ):
+            item["ai_previous_judgment"] = {key: item.get(key) for key in ("ai_status", "ai_reason", "ai_visual_text")}
+            item["ai_status"] = "AI需复核"
+            item["ai_reason"] = "判题规则已更新为原图优先，请重新运行AI判断"
+            item["ai_review_policy"] = "pending-" + AI_REVIEW_POLICY
+            changed = True
         normalized_expected = _normalize_correction_expected(
             item.get("question"),
             item.get("expected_answer", ""),
@@ -1332,7 +1359,62 @@ def refresh_rule_judgments(review):
     return changed
 
 
+def _validate_visual_judgment(item):
+    """以图像转录校验AI结论，OCR置信度和文本只保留作参考。"""
+    if item.get("ai_status") not in {"AI通过", "AI不通过", "AI需复核"}:
+        return
+    evidence = item.get("ai_visual_evidence") or {}
+    visual = item.get("ai_visual_text", "").strip()
+    confidence = float(item.get("ai_confidence", 0) or 0)
+    if evidence.get("image_status") in {"uncertain", "unavailable"}:
+        item["ai_status"], item["ai_reason"] = "AI需复核", "原图文字存在歧义或图像转录待补充，请核对图片"
+        return
+    if confidence < 0.65:
+        item["ai_status"], item["ai_reason"] = "AI需复核", "读图置信度偏低，请核对原图"
+        return
+    if evidence.get("image_status") == "blank":
+        if visual:
+            item["ai_status"], item["ai_reason"] = "AI需复核", "图像空白标记与转录内容冲突，请核对图片"
+        else:
+            item["ai_status"], item["ai_reason"] = "AI不通过", "原图确认作答区域为空白"
+        return
+    if not visual:
+        item["ai_status"], item["ai_reason"] = "AI需复核", "图像转录为空，请核对原图"
+        return
+    if not _is_correction_question(item.get("question")):
+        return
+    line_status = evidence.get("line_number_status", "")
+    if line_status == "ambiguous":
+        item["ai_status"], item["ai_reason"] = "AI需复核", "手写行号字形存在歧义（如6/b），请依据原图复核"
+        return
+    visual_line, _content = _split_correction_answer(visual)
+    if (line_status == "present" and visual_line is None) or (
+        line_status in {"missing", "printed_only"} and visual_line is not None
+    ):
+        item["ai_status"], item["ai_reason"] = "AI需复核", "行号图像证据与文字转录冲突，请核对原图"
+        return
+    if line_status in {"missing", "printed_only"}:
+        item["ai_status"], item["ai_reason"] = "AI不通过", "原图确认缺少手写数字行号，改错题要求行号和内容齐全"
+        return
+    # 类似(b)的转录既可能是6，也可能是标签；仅凭字符串保留为待复核。
+    if re.match(r"^\s*[（(\[【]\s*[A-Za-z]+\s*[）)\]】]", visual):
+        item["ai_status"], item["ai_reason"] = "AI需复核", "手写行号转录存在字母/数字歧义，请核对原图"
+        return
+    strict_status, strict_reason = judge_answer(
+        item.get("expected_answer", ""), visual, confidence, question=item.get("question"),
+    )
+    if strict_status != "自动通过":
+        item["ai_status"] = "AI不通过" if strict_status == "不通过" else "AI需复核"
+        item["ai_reason"] = "图像转录校验：" + strict_reason
+    elif evidence.get("image_status") == "clear" and item.get("ai_status") in {"AI通过", "AI不通过"}:
+        item["ai_status"], item["ai_reason"] = "AI通过", "原图转录的手写行号和改错内容与参考答案一致"
+
+
 def apply_ai_review(review, progress_callback=None):
+    for item in review.get("items", []):
+        item["expected_answer"] = _normalize_correction_expected(
+            item.get("question"), item.get("expected_answer", ""), item.get("source_content", ""),
+        )
     if progress_callback is None:
         result = judge_handwritten_items(review.get("items", []))
     else:
@@ -1346,22 +1428,17 @@ def apply_ai_review(review, progress_callback=None):
             item["ai_visual_text"] = _clean_visual_text(item.get("question"), ai_result.get("visual_text", ""))
             item["ai_reason"] = ai_result["reason"]
             item["ai_corrected_answer"] = ai_result["corrected_answer"]
-            if item["ai_status"] == "AI通过" and _is_correction_question(item.get("question")):
-                normalized_expected = _normalize_correction_expected(
-                    item.get("question"),
-                    item.get("expected_answer", ""),
-                    item.get("source_content", ""),
+            item["ai_review_policy"] = ai_result.get("policy", AI_REVIEW_POLICY)
+            item["ai_visual_evidence"] = ai_result.get("visual_evidence", {})
+            if item["ai_visual_evidence"]:
+                item["ai_visual_text"] = _clean_visual_text(
+                    item.get("question"), item["ai_visual_evidence"].get("visual_text", ""),
                 )
-                item["expected_answer"] = normalized_expected
-                visual_answer = item["ai_visual_text"] or item.get("recognized_text", "")
-                strict_status, strict_reason = judge_answer(
-                    normalized_expected, visual_answer,
-                    max(float(item.get("confidence", 0) or 0), float(item.get("ai_confidence", 0) or 0)),
-                    question=item.get("question"),
+                item["ai_confidence"] = min(
+                    float(item["ai_confidence"] or 0),
+                    float(item["ai_visual_evidence"].get("confidence", 0) or 0),
                 )
-                if strict_status != "自动通过":
-                    item["ai_status"] = "AI不通过" if strict_status == "不通过" else "AI需复核"
-                    item["ai_reason"] = strict_reason
+            _validate_visual_judgment(item)
         elif result["status"] == "未配置":
             item["ai_status"] = "AI待配置"
             item["ai_confidence"] = 0.0
@@ -1416,6 +1493,7 @@ def _build_review_from_maps(source_map, answers, source_meta, card_paths, image_
             reason=reason,
         ))
         group_key, group_label = (group_map or {}).get(question, (question.split("(", 1)[0], question.split("(", 1)[0]))
+        item["recognition_source"] = "ocr" if card.get("local_ocr_enabled", True) else "ai"
         item["ai_group"] = group_key
         item["major_question"] = group_label
         item["score"] = _score_number((score_map or {}).get(question, 0))
@@ -1451,6 +1529,7 @@ def _build_review_from_maps(source_map, answers, source_meta, card_paths, image_
         "ok": True,
         "review_id": uuid.uuid4().hex[:12],
         "source": {**source_meta, "answer_count": len(answers)},
+        **recognition_settings(card.get("local_ocr_enabled")),
         "student_id": card.get("student_id", ""),
         **{key: card[key] for key in IDENTITY_FIELDS if key in card},
         "paper_type": card.get("paper_type", ""),
@@ -1461,7 +1540,7 @@ def _build_review_from_maps(source_map, answers, source_meta, card_paths, image_
         "alignment_scores": card.get("alignment_scores", []),
         "crop_adjustments": card.get("crop_adjustments", {}),
     }
-    review["ai_judgment"] = {"status": "待运行", "enabled": False, "processed": 0, "message": "OCR与规则初判已完成"}
+    review["ai_judgment"] = {"status": "待运行", "enabled": False, "processed": 0, "message": "文字识别与规则初判已完成"}
     for item in review["items"]:
         item.update({"ai_status": "AI待处理", "ai_confidence": 0.0, "ai_visual_text": "", "ai_reason": "", "ai_corrected_answer": ""})
     review["review_summary"] = _review_summary(review["items"])

@@ -1,4 +1,5 @@
-"""Candidate records backed by existing reviews; OCR runs asynchronously and locally."""
+"""Candidate records backed by reviews; text recognition follows each review mode."""
+from recognition_config import resolve_local_ocr_enabled
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import json
@@ -162,6 +163,9 @@ class CandidateManager:
         for identifier in identifiers:
             try:
                 with self.lock:self.job['message']='正在识别第 {} / {} 份姓名'.format(self.job['completed']+1,self.job['total'])
+                with self.review_lock:
+                    _,_,saved_review=self.load(identifier)
+                local_ocr=resolve_local_ocr_enabled(saved_review.get('local_ocr_enabled'))
                 self.preview_builder(identifier)
                 folder=Path(self.root())/identifier/'output/handwriting'
                 image=cv2.imdecode(np.frombuffer((folder/'objective_view/page.png').read_bytes(),np.uint8),cv2.IMREAD_GRAYSCALE)
@@ -169,10 +173,13 @@ class CandidateManager:
                 if ratio>=.006:
                     if self.recognizer is None:
                         from exam_review import _recognize_crops
-                        predictions=_recognize_crops([crop],['姓名'])
+                        if not local_ocr:
+                            crop=cv2.imdecode(np.frombuffer((folder/'identity/name.png').read_bytes(),np.uint8),cv2.IMREAD_GRAYSCALE)
+                        predictions=_recognize_crops([crop],['姓名'],local_ocr_enabled=local_ocr)
                     else:predictions=self.recognizer([crop],['姓名'])
                     fields=name_fields(predictions[0],ratio)
                 else:fields=name_fields(None,ratio)
+                fields['student_name_source']='ocr' if local_ocr else 'ai'
                 with self.review_lock:
                     _,path,review=self.load(identifier)
                     merge_name_fields(review,fields);self.write(path,review)

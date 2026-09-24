@@ -79,6 +79,7 @@ def health() -> dict:
         "ok": True,
         "service": "OMRChecker API",
         "review_concurrency": legacy.DEFAULT_REVIEW_WORKERS,
+        "recognition": legacy.recognition_settings(),
         "ai_judgment": {
             "configured": legacy.ai_is_configured(),
             "model": ai_settings["model"],
@@ -187,13 +188,13 @@ def batch_status(request: Request, batch_id: str = "") -> dict:
 @app.post("/api/scan")
 def scan(request: Request, payload: dict) -> dict:
     user = current_user(request)
-    return legacy.run_scan_job(payload.get("files", []), False, payload.get("template_id"), str(user.get("id") or user.get("sub") or ""))
+    return legacy.run_scan_job(payload.get("files", []), False, payload.get("template_id"), str(user.get("id") or user.get("sub") or ""), local_ocr_enabled=payload.get("local_ocr_enabled"))
 
 
 @app.post("/api/demo")
 def demo(request: Request, payload: dict) -> dict:
     user = current_user(request)
-    return legacy.run_scan_job([], True, payload.get("template_id"), str(user.get("id") or user.get("sub") or ""))
+    return legacy.run_scan_job([], True, payload.get("template_id"), str(user.get("id") or user.get("sub") or ""), local_ocr_enabled=payload.get("local_ocr_enabled"))
 
 
 @app.post("/api/sheets")

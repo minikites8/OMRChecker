@@ -25,6 +25,7 @@ from urllib.request import urlopen
 
 from sheet_designer import generate_sheet_package
 from ai_judge import ai_config, ai_is_configured
+from recognition_config import recognition_settings
 from exam_import import import_exam_and_answers
 from exam_review import apply_ai_review, apply_manual_review, attach_structured_scores, build_review_from_structured, refresh_rule_judgments, _import_variant_for_review as exam_review_variant_for_review
 from scan_templates import TemplateManager
@@ -348,9 +349,17 @@ def _review_import(payload):
     return import_id, normalized_path, imported
 
 
+def _recognition_settings(value=None):
+    settings = recognition_settings(value)
+    if not settings["local_ocr_enabled"] and not ai_is_configured():
+        raise ValueError("仅 AI 识别需要配置 HANDWRITING_AI_API_KEY 或 OPENAI_API_KEY")
+    return settings
+
+
 def _create_review_report(import_id, normalized_path, imported, card_files,
                           batch_id="", batch_index=0, label="", update_latest=True,
-                          template_id=None, owner_user_id=""):
+                          template_id=None, owner_user_id="", local_ocr_enabled=None):
+    settings = _recognition_settings(local_ocr_enabled)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     review_id = "{}-{}".format(stamp, uuid.uuid4().hex[:6])
     review_root = REVIEW_ROOT / review_id
@@ -365,13 +374,14 @@ def _create_review_report(import_id, normalized_path, imported, card_files,
         "image_dir": output_dir / "handwriting",
     }
     if "template_config" in inspect.signature(build_review_from_structured).parameters:
-        review_arguments["template_config"] = selected_template.get("recognition", {})
+        review_arguments["template_config"] = {**selected_template.get("recognition", {}), **settings}
     report = build_review_from_structured(
         imported["exam"],
         {"answer_map": imported.get("answer_map", {})},
         card_paths,
         **review_arguments,
     )
+    report.update(settings)
     report.setdefault("paper_type", "")
     report.setdefault("paper_type_status", "待复核")
     report["review_id"] = review_id
@@ -419,6 +429,7 @@ def run_review_job(payload):
         import_id, normalized_path, imported, card_files, update_latest=True,
         template_id=payload.get("template_id"),
         owner_user_id=str(payload.get("_actor_user_id") or ""),
+        local_ocr_enabled=payload.get("local_ocr_enabled"),
     )
 
 
@@ -495,7 +506,7 @@ def _compact_review(report, label=""):
     }
 
 
-def _batch_review_worker(batch_id, import_id, normalized_path, imported, groups, concurrency, template_id, owner_user_id=""):
+def _batch_review_worker(batch_id, import_id, normalized_path, imported, groups, concurrency, template_id, owner_user_id="", local_ocr_enabled=None):
     _clean_id, batch_path = _batch_path(batch_id)
     started = time.perf_counter()
     try:
@@ -521,6 +532,7 @@ def _batch_review_worker(batch_id, import_id, normalized_path, imported, groups,
                     False,
                     template_id,
                     owner_user_id,
+                    local_ocr_enabled,
                 )
 
         futures = {
@@ -580,6 +592,7 @@ def _batch_review_worker(batch_id, import_id, normalized_path, imported, groups,
 
 
 def start_batch_review(payload):
+    settings = _recognition_settings(payload.get("local_ocr_enabled"))
     import_id, normalized_path, imported = _review_import(payload)
     groups = _normalize_card_groups(payload)
     concurrency = max(1, min(DEFAULT_REVIEW_WORKERS, int(payload.get("concurrency") or DEFAULT_REVIEW_WORKERS)))
@@ -588,6 +601,7 @@ def start_batch_review(payload):
     batch_id = "{}-{}".format(datetime.now().strftime("%Y%m%d-%H%M%S"), uuid.uuid4().hex[:6])
     _clean_id, batch_path = _batch_path(batch_id)
     batch = {
+        **settings,
         "ok": True,
         "batch_id": batch_id,
         "import_id": import_id,
@@ -609,7 +623,7 @@ def start_batch_review(payload):
         _write_batch(batch_path, batch)
         worker = threading.Thread(
             target=_batch_review_worker,
-            args=(batch_id, import_id, normalized_path, imported, groups, concurrency, selected_template["id"], str(payload.get("_actor_user_id") or "")),
+            args=(batch_id, import_id, normalized_path, imported, groups, concurrency, selected_template["id"], str(payload.get("_actor_user_id") or ""), settings["local_ocr_enabled"]),
             daemon=True,
             name="omr-batch-{}".format(batch_id),
         )
@@ -835,7 +849,7 @@ def run_ai_review(payload):
     with AI_REVIEW_LOCK:
         _id, _path, latest = _load_review(review_id)
         by_question = {str(item.get("question")): item for item in updated.get("items", [])}
-        ai_fields = ("ai_status", "ai_confidence", "ai_visual_text", "ai_reason", "ai_corrected_answer", "final_status", "score_basis", "awarded_score")
+        ai_fields = ("ai_status", "ai_confidence", "ai_visual_text", "ai_reason", "ai_corrected_answer", "ai_review_policy", "ai_visual_evidence", "expected_answer", "final_status", "score_basis", "awarded_score")
         for item in latest.get("items", []):
             source = by_question.get(str(item.get("question")), {})
             item.update({field: source[field] for field in ai_fields if field in source})
@@ -884,7 +898,8 @@ def start_ai_review(payload):
     return review
 
 
-def run_scan_job(files=None, demo=False, template_id=None, owner_user_id=""):
+def run_scan_job(files=None, demo=False, template_id=None, owner_user_id="", local_ocr_enabled=None):
+    settings = _recognition_settings(local_ocr_enabled)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     job_id = "{}-{}".format(stamp, uuid.uuid4().hex[:6])
     job_root = JOBS_ROOT / job_id
@@ -900,6 +915,7 @@ def run_scan_job(files=None, demo=False, template_id=None, owner_user_id=""):
         "-a", "-i", str(input_dir), "-o", str(output_dir),
     ]
     environment = os.environ.copy()
+    environment["OMR_LOCAL_OCR_ENABLED"] = "1" if settings["local_ocr_enabled"] else "0"
     environment["PYTHONUTF8"] = "1"
     environment["PYTHONIOENCODING"] = "utf-8"
     started = time.perf_counter()
@@ -935,6 +951,7 @@ def run_scan_job(files=None, demo=False, template_id=None, owner_user_id=""):
     return {
         "ok": True,
         "job_id": job_id,
+        **settings,
         "template_id": selected_template["id"],
         "template_name": selected_template["name"],
         "file_count": len(uploaded),
@@ -1067,6 +1084,7 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                     "ok": True,
                     "service": "OMR 扫描台",
                     "review_concurrency": DEFAULT_REVIEW_WORKERS,
+                    "recognition": recognition_settings(),
                     "ai_judgment": {
                         "configured": ai_is_configured(),
                         "model": ai_settings["model"],
@@ -1173,6 +1191,7 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                     files=payload.get("files", []), demo=route == "/api/demo",
                     template_id=payload.get("template_id"),
                     owner_user_id=str(payload.get("_actor_user_id") or ""),
+                    local_ocr_enabled=payload.get("local_ocr_enabled"),
                 )
             self.send_json(200, result)
         except AuthError as error:

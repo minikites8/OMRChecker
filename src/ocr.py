@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 
 from src.logger import logger
+from recognition_config import resolve_local_ocr_enabled
 
 
 @dataclass(frozen=True)
@@ -164,7 +165,20 @@ class PaddleTextRecognizer:
         return results
 
 
+class AITextRecognizer:
+    """Read text through the shared vision API; model dependencies load per provider."""
+    def recognize(self, images, field_labels):
+        from ai_judge import recognize_handwriting_crops
+        results = recognize_handwriting_crops(images, field_labels)
+        errors = [result.error for result in results if result.error]
+        if errors:
+            raise RuntimeError("; ".join(dict.fromkeys(errors)))
+        return [OCRResult(text=result.text, confidence=result.confidence) for result in results]
+
+
 def create_text_recognizer(ocr_params):
+    if not resolve_local_ocr_enabled(config_value(ocr_params, "local_ocr_enabled")):
+        return AITextRecognizer()
     provider = config_value(ocr_params, "provider", "paddleocr")
     if provider == "paddleocr":
         return PaddleTextRecognizer(ocr_params)

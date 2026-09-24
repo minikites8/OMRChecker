@@ -48,6 +48,7 @@
         <label class="field"><span>已导入的试卷与答案</span><select id="reviewImportSelect"><option value="">请选择已导入试卷</option></select></label>
         <label class="field"><span>识别模板</span><select id="reviewTemplateSelect"><option value="">正在加载模板</option></select></label>
         <label class="field"><span>答题卡文件（可选择多份）</span><input id="reviewCardFiles" type="file" accept=".jpg,.jpeg,.png,.pdf" multiple></label>
+        <label class="field recognition-mode-field"><span>文字识别方式</span><select id="reviewRecognitionMode" data-recognition-mode><option value="local_ocr_ai">本地 OCR + AI 审核</option><option value="ai_only">仅 AI 识别（关闭本地 OCR）</option></select><small>仅 AI 模式使用已配置的 AI 接口；填涂检测与图像定位保持启用。</small></label>
         <label class="field"><span>同时批改数量</span><select id="reviewConcurrency"><option value="1">1 份</option><option value="2" selected>2 份</option><option value="3">3 份</option><option value="4">4 份</option></select></label>
       </div>
       <div id="reviewFileSummary" class="upload-summary" aria-live="polite">选择文件后将在这里显示份数与大小。</div>
@@ -158,6 +159,7 @@
           <div><p class="panel-kicker">扫描输入</p><h2>添加试卷</h2></div>
         </div>
         <label class="field scan-template-field"><span>识别模板</span><select id="scanTemplateSelect"><option value="">正在加载模板</option></select></label>
+        <label class="field recognition-mode-field"><span>文字识别方式</span><select id="scanRecognitionMode" data-recognition-mode><option value="local_ocr_ai">本地 OCR</option><option value="ai_only">仅 AI 识别（关闭本地 OCR）</option></select><small>仅 AI 模式使用已配置的 AI 接口；填涂检测与图像定位保持启用。</small></label>
         <label class="drop-zone" id="dropZone" for="fileInput">
           <input id="fileInput" type="file" accept=".jpg,.jpeg,.png,.pdf" multiple>
           <span class="upload-icon">
@@ -209,4 +211,4 @@
       </div>
     </section></section>
 <footer class="workspace-footer"><span>阅卷台 · 让每一份作答得到认真对待</span><span id="platformServiceStatus">正在检查服务状态</span></footer>
-</main></div><div class="error-toast" id="errorToast" role="alert"></div><div class="platform-toast" id="platformToast" role="status"></div><script src="/static/platform.js?v=20260920-subjective" defer></script><script src="/static/api.js?v=20260923" defer></script><script src="/static/auth.js?v=20260923" defer></script><script src="/static/objective-view.js?v=20260920-sidebar" defer></script><script src="/static/candidates.js?v=1" defer></script><script src="/static/subjective-view.js?v=20260920" defer></script><script src="/static/templates.js?v=20260921" defer></script><script src="/static/app.js?v=20260921-templates" defer></script></body></html>
+</main></div><div class="error-toast" id="errorToast" role="alert"></div><div class="platform-toast" id="platformToast" role="status"></div><script src="/static/platform.js?v=20260920-subjective" defer></script><script src="/static/api.js?v=20260923" defer></script><script src="/static/auth.js?v=20260923" defer></script><script src="/static/objective-view.js?v=20260920-sidebar" defer></script><script src="/static/candidates.js?v=1" defer></script><script src="/static/subjective-view.js?v=20260920" defer></script><script src="/static/templates.js?v=20260921" defer></script><script src="/static/app.js?v=ai-only-1" defer></script></body></html>

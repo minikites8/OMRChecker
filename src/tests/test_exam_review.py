@@ -630,3 +630,57 @@ def test_saved_review_score_refresh_uses_selected_paper_variant(monkeypatch, tmp
     assert scan_ui._ensure_review_scores(review) is True
     assert review["objective"][0]["score"] == 7
     assert review["score_summary"]["possible_score"] == 7
+
+
+def test_old_correction_ai_judgment_requests_image_recheck_once():
+    review = {"items": [{"question": "55", "expected_answer": '6. scanf("%s", name);',
+        "recognized_text": '(b) scanf("%s", name);', "confidence": 0.95,
+        "ai_status": "AI不通过", "ai_reason": "缺少行号", "ai_visual_text": 'scanf("%s", name);',
+        "score": 1, "manual_status": "待复核"}], "objective": []}
+    assert exam_review.refresh_rule_judgments(review)
+    item = review["items"][0]
+    assert item["ai_status"] == "AI需复核"
+    assert item["ai_previous_judgment"]["ai_status"] == "AI不通过"
+    assert review["score_summary"]["pending_score"] == 1
+    assert exam_review.refresh_rule_judgments(review) is False
+
+
+@pytest.mark.parametrize("manual,confirmed", [("通过", False), ("不通过", False), ("待复核", True)])
+def test_visual_policy_refresh_preserves_confirmed_or_manual_grades(manual, confirmed):
+    review = {"grade_confirmed": confirmed, "items": [{
+        "question": "55", "expected_answer": '6. scanf("%s", name);',
+        "recognized_text": '(b) scanf("%s", name);', "confidence": 0.95,
+        "ai_status": "AI不通过", "score": 1, "manual_status": manual,
+    }], "objective": []}
+    exam_review.refresh_rule_judgments(review)
+    assert review["items"][0]["ai_status"] == "AI不通过"
+    assert review["items"][0]["manual_status"] == manual
+
+
+def test_run_ai_review_persists_image_evidence_and_policy(monkeypatch, tmp_path):
+    import copy
+    evidence = {"visual_text": '(6) scanf("%s", name);', "confidence": 0.93,
+                "image_status": "clear", "line_number_status": "present"}
+    saved = {"ok": True, "items": [{"question": "55", "handwriting_urls": []}], "objective": []}
+    path = tmp_path / "review.json"
+    monkeypatch.setattr(scan_ui, "_load_review", lambda ident: (ident, path, copy.deepcopy(saved)))
+    monkeypatch.setattr(scan_ui, "_ensure_review_scores", lambda review: False)
+    def apply(review, progress_callback=None):
+        review["items"][0].update({"expected_answer": '6. scanf("%s", name);',
+            "ai_status": "AI通过", "ai_visual_text": evidence["visual_text"],
+            "ai_review_policy": exam_review.AI_REVIEW_POLICY, "ai_visual_evidence": evidence})
+        review["ai_judgment"] = {"status": "已完成"}
+        review["review_summary"] = {"ai_pass": 1}
+        return review
+    monkeypatch.setattr(scan_ui, "apply_ai_review", apply)
+    def write(path, review):
+        saved.clear()
+        saved.update(copy.deepcopy(review))
+    monkeypatch.setattr(scan_ui, "_write_review", write)
+    result = scan_ui.run_ai_review({"review_id": "image-primary"})
+    for report in (saved, result):
+        item = report["items"][0]
+        assert item["ai_review_policy"] == exam_review.AI_REVIEW_POLICY
+        assert item["ai_visual_evidence"] == evidence
+        assert item["ai_visual_text"].startswith("(6)")
+        assert item["expected_answer"].startswith("6.")
