@@ -23,11 +23,10 @@ from ai_judge import AI_REVIEW_POLICY, _clean_visual_text, judge_handwritten_ite
 from answer_alignment import align_printed_region
 from candidate_identity import IDENTITY_FIELDS, prepare_name_crop, name_fields
 from recognition_config import recognition_settings, resolve_local_ocr_enabled
+from recognition_assets import REFERENCE_PDF, MARKER_ASSET, require_file
 
 PAGE_W = 595.2756
 PAGE_H = 841.8898
-REFERENCE_PDF = Path(__file__).resolve().parent / "output" / "pdf" / "exam_16th_answer_card_unified_2026" / "第十六届软件方向二面试题A_B_C通用答题卡_定位标记版.pdf"
-MARKER_ASSET = Path(__file__).resolve().parent / "output" / "pdf" / "exam_answer_cards" / "marker_version" / "omr_marker.jpg"
 MARKER_INSET_PT = 26.0
 PAPER_TYPE_OPTIONS = "ABC"
 PAPER_TYPE_BUBBLE_X = 458.0
@@ -466,8 +465,7 @@ def _target_marker_centers(target_w, target_h):
 
 def _warp_marker_page(gray):
     """通过四个定位标记直接校正整张纸，保留完整页边和四角标记。"""
-    if not MARKER_ASSET.is_file():
-        return None
+    require_file(MARKER_ASSET, "定位标记图片")
     import src.template
 
     target_w, target_h = int(PAGE_W * 2), int(PAGE_H * 2)
@@ -547,11 +545,15 @@ def _warp_page(image):
 
 def _reference_pages(reference_pdf=None):
     reference_path = Path(reference_pdf) if reference_pdf else REFERENCE_PDF
-    if not reference_path.is_file():
-        return []
-    document = fitz.open(str(reference_path))
+    require_file(reference_path, "答题卡定位参考 PDF")
+    try:
+        document = fitz.open(str(reference_path))
+    except Exception as error:
+        raise ValueError(f"答题卡定位参考 PDF 读取失败：{reference_path}（{error}）") from error
     pages = []
     try:
+        if len(document) < 2:
+            raise ValueError(f"答题卡定位参考 PDF 至少需要两页：{reference_path}")
         for page in document:
             pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), colorspace=fitz.csGRAY, alpha=False)
             pages.append(np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(pixmap.height, pixmap.width).copy())

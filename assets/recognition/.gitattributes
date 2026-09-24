@@ -1,0 +1,5 @@
+# Preserve exact reference pixels and manifest-verified configuration bytes.
+*.pdf binary
+*.jpg binary
+phone_scan/*.png binary
+phone_scan/*.json -text

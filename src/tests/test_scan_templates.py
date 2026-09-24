@@ -2,10 +2,11 @@ import json
 from pathlib import Path
 
 from scan_templates import TemplateManager
+from recognition_assets import SCAN_REL
 
 
 def _legacy_scan_root(tmp_path):
-    root = tmp_path / "inputs" / "phone_scan"
+    root = tmp_path / SCAN_REL
     root.mkdir(parents=True)
     (root / "template.json").write_text(json.dumps({"preProcessors": []}), encoding="utf-8")
     (root / "config.json").write_text("{}", encoding="utf-8")

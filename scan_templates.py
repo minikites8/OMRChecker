@@ -10,6 +10,11 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from recognition_assets import (
+    LEGACY_SCAN_REL, SCAN_REL, REFERENCE_16TH_REL, REFERENCE_15TH_REL,
+    migrate_reference, scan_resource_errors,
+)
+
 
 class TemplateManager:
     def __init__(self, project_root: Path, legacy_scan_root: Path, storage_root: Path | None = None):
@@ -29,10 +34,10 @@ class TemplateManager:
                 "id": "software-16th-abc",
                 "name": "第十六届软件方向 A/B/C 通用答题卡",
                 "description": "两页答题卡；61—63填空，64算法题。",
-                "scan_source": "inputs/phone_scan",
+                "scan_source": SCAN_REL,
                 "builtin": True,
                 "recognition": {
-                    "reference_pdf": "output/pdf/exam_16th_answer_card_unified_2026/第十六届软件方向二面试题A_B_C通用答题卡_定位标记版.pdf",
+                    "reference_pdf": REFERENCE_16TH_REL,
                     "question_order": [str(i) for i in range(31, 65)],
                     "layout": "16th_abc_61_63_fill_64_algorithm",
                     "material_mode": "grouped_61_63",
@@ -44,10 +49,10 @@ class TemplateManager:
                 "id": "software-15th-a",
                 "name": "第十五届软件方向 A 卷答题卡",
                 "description": "两页定位标记版；61—63按子空识别，64算法题。",
-                "scan_source": "inputs/phone_scan",
+                "scan_source": SCAN_REL,
                 "builtin": True,
                 "recognition": {
-                    "reference_pdf": "output/pdf/exam_answer_cards/marker_version/15th软件方向二面试题A卷答题卡_定位标记版.pdf",
+                    "reference_pdf": REFERENCE_15TH_REL,
                     "question_order": [*(str(i) for i in range(31, 61)), "61(1)", "61(2)", "62(1)", "62(2)", "63(1)", "63(2)", "63(3)", "64"],
                     "layout": "15th_a_legacy_subfields_64_algorithm",
                     "material_mode": "legacy_subfields",
@@ -86,6 +91,20 @@ class TemplateManager:
                 recognition_path = self.storage_root / item["id"] / "recognition.json"
                 if not recognition_path.is_file():
                     self._write_recognition(item["id"], item["recognition"])
+            # 迁移已有内置配置和复制模板的默认引用，保留选中状态与自定义参数。
+            for entry in registry.get("templates", []):
+                if entry.get("builtin") and entry.get("scan_source") == LEGACY_SCAN_REL:
+                    entry["scan_source"] = SCAN_REL
+                    changed = True
+                template_id = self._clean_id(entry["id"])
+                recognition_path = self.storage_root / template_id / "recognition.json"
+                if recognition_path.is_file():
+                    data = json.loads(recognition_path.read_text(encoding="utf-8-sig"))
+                    reference = data.get("reference_pdf")
+                    migrated = migrate_reference(reference, self.project_root)
+                    if reference and migrated != reference:
+                        data["reference_pdf"] = migrated
+                        self._write_recognition(template_id, data)
             if not registry.get("active_template_id") and registry.get("templates"):
                 registry["active_template_id"] = registry["templates"][0]["id"]
                 changed = True
@@ -130,7 +149,7 @@ class TemplateManager:
         if not path.is_file():
             return {}
         data = json.loads(path.read_text(encoding="utf-8-sig"))
-        reference = str(data.get("reference_pdf") or "").strip()
+        reference = migrate_reference(data.get("reference_pdf"), self.project_root)
         if reference:
             resolved = (self.project_root / reference).resolve()
             if resolved != self.project_root and self.project_root not in resolved.parents:
@@ -145,7 +164,8 @@ class TemplateManager:
             entry["active"] = entry["id"] == registry.get("active_template_id")
             entry["recognition"] = self._recognition(entry["id"])
             scan_root = self._scan_root(entry)
-            entry["scan_ready"] = (scan_root / "template.json").is_file() and (scan_root / "config.json").is_file()
+            entry["resource_errors"] = scan_resource_errors(scan_root)
+            entry["scan_ready"] = not entry["resource_errors"]
             entry["review_ready"] = bool(entry["recognition"].get("reference_pdf")) and Path(entry["recognition"].get("reference_pdf", "")).is_file()
             return entry
 
@@ -157,7 +177,7 @@ class TemplateManager:
 
     def _scan_root(self, entry):
         if entry.get("builtin"):
-            root = (self.project_root / entry.get("scan_source", "inputs/phone_scan")).resolve()
+            root = (self.project_root / entry.get("scan_source", SCAN_REL)).resolve()
             if root != self.project_root and self.project_root not in root.parents:
                 raise ValueError("扫描模板路径超出项目目录")
         else:
@@ -200,7 +220,7 @@ class TemplateManager:
                 "id": template_id,
                 "name": name,
                 "description": description,
-                "scan_source": source.get("scan_source", "inputs/phone_scan"),
+                "scan_source": source.get("scan_source", SCAN_REL),
                 "builtin": False,
                 "created_at": now,
                 "updated_at": now,

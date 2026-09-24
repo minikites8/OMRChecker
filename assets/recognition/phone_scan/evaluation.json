@@ -1,0 +1,41 @@
+{
+  "source_type": "custom",
+  "options": {
+    "questions_in_order": [
+      "student_id",
+      "name",
+      "student_id_written",
+      "q1..5",
+      "judge1..5",
+      "text1..5"
+    ],
+    "answers_in_order": [
+      "12345678",
+      "FILLED",
+      "FILLED",
+      "A",
+      "B",
+      "C",
+      "D",
+      "A",
+      "T",
+      "F",
+      "T",
+      "F",
+      "T",
+      "FILLED",
+      "FILLED",
+      "FILLED",
+      "FILLED",
+      "FILLED"
+    ],
+    "should_explain_scoring": false
+  },
+  "marking_schemes": {
+    "DEFAULT": {
+      "correct": 1,
+      "incorrect": 0,
+      "unmarked": 0
+    }
+  }
+}

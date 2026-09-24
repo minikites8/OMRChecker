@@ -1,0 +1,175 @@
+{
+  "pageDimensions": [
+    2550,
+    3300
+  ],
+  "bubbleDimensions": [
+    32,
+    32
+  ],
+  "preProcessors": [
+    {
+      "name": "AlignPageBorder",
+      "options": {
+        "targetRect": [
+          120,
+          230,
+          2430,
+          3020
+        ],
+        "topSearch": [
+          0.055,
+          0.18
+        ],
+        "bottomSearch": [
+          0.65,
+          0.94
+        ],
+        "leftSearch": [
+          0.035,
+          0.3
+        ],
+        "rightSearch": [
+          0.7,
+          0.995
+        ],
+        "houghThreshold": 250,
+        "maxBottomLineRank": 500,
+        "minAreaRatio": 0.25,
+        "disableAutoAlign": true
+      }
+    },
+    {
+      "name": "FeatureBasedAlignment",
+      "options": {
+        "reference": "reference_blank.png",
+        "maxFeatures": 10000,
+        "goodMatchPercent": 0.2,
+        "preserveForOCR": true
+      }
+    }
+  ],
+  "fieldBlocks": {
+    "MCQ": {
+      "fieldType": "QTYPE_MCQ4",
+      "origin": [
+        220,
+        1050
+      ],
+      "bubblesGap": 72,
+      "labelsGap": 105,
+      "fieldLabels": [
+        "q1..5"
+      ]
+    },
+    "TrueFalse": {
+      "bubbleValues": [
+        "T",
+        "F"
+      ],
+      "direction": "horizontal",
+      "origin": [
+        1450,
+        1050
+      ],
+      "bubblesGap": 100,
+      "labelsGap": 125,
+      "fieldLabels": [
+        "judge1..5"
+      ]
+    },
+    "StudentID": {
+      "fieldType": "QTYPE_INT",
+      "origin": [
+        220,
+        450
+      ],
+      "bubblesGap": 45,
+      "labelsGap": 155,
+      "fieldLabels": [
+        "sid1..8"
+      ]
+    },
+    "Name": {
+      "fieldType": "QTYPE_TEXT",
+      "bubbleDimensions": [
+        800,
+        85
+      ],
+      "origin": [
+        1450,
+        560
+      ],
+      "bubblesGap": 0,
+      "labelsGap": 0,
+      "fieldLabels": [
+        "name"
+      ]
+    },
+    "HandwrittenFill": {
+      "fieldType": "QTYPE_TEXT",
+      "bubbleDimensions": [
+        1950,
+        85
+      ],
+      "origin": [
+        300,
+        1810
+      ],
+      "bubblesGap": 0,
+      "labelsGap": 190,
+      "fieldLabels": [
+        "text1..5"
+      ]
+    },
+    "StudentIDWritten": {
+      "fieldType": "QTYPE_TEXT",
+      "bubbleDimensions": [
+        800,
+        85
+      ],
+      "origin": [
+        1450,
+        760
+      ],
+      "bubblesGap": 0,
+      "labelsGap": 0,
+      "fieldLabels": [
+        "student_id_written"
+      ]
+    }
+  },
+  "customLabels": {
+    "student_id": [
+      "sid1",
+      "sid2",
+      "sid3",
+      "sid4",
+      "sid5",
+      "sid6",
+      "sid7",
+      "sid8"
+    ]
+  },
+  "outputColumns": [
+    "student_id",
+    "name",
+    "student_id_written",
+    "q1",
+    "q2",
+    "q3",
+    "q4",
+    "q5",
+    "judge1",
+    "judge2",
+    "judge3",
+    "judge4",
+    "judge5",
+    "text1",
+    "text2",
+    "text3",
+    "text4",
+    "text5"
+  ],
+  "emptyValue": ""
+}

@@ -1,5 +1,6 @@
 """题号局部配准、保守填涂判断和多行 OCR 的自包含回归测试。"""
 import threading
+from pathlib import Path
 from types import SimpleNamespace
 
 import cv2
@@ -129,7 +130,7 @@ def test_thought_and_code_preview_files_are_distinct(tmp_path, monkeypatch):
 
 
 def test_16th_reference_and_subjective_crop_geometry():
-    assert er.REFERENCE_PDF.name == "第十六届软件方向二面试题A_B_C通用答题卡_定位标记版.pdf"
+    assert er.REFERENCE_PDF == Path(er.__file__).resolve().parent / "assets/recognition/software-16th-abc.pdf"
     assert er.REFERENCE_PDF.is_file()
     assert region_anchors("material") == [
         (44, 577.0, 18, 12),

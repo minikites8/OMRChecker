@@ -1,0 +1,41 @@
+{
+  "dimensions": {
+    "processing_height": 3300,
+    "processing_width": 2550,
+    "display_height": 3300,
+    "display_width": 2550
+  },
+  "threshold_params": {
+    "TEXT_INK_THRESHOLD": 180,
+    "TEXT_MIN_INK_RATIO": 0.01
+  },
+  "pdf_params": {
+    "pdf_dpi": 300,
+    "pdf_page": null
+  },
+  "outputs": {
+    "show_image_level": 0,
+    "save_image_level": 0,
+    "save_detections": true,
+    "filter_out_multimarked_files": false
+  },
+  "ocr_params": {
+    "enabled": true,
+    "provider": "paddleocr",
+    "model_name": "PP-OCRv6_medium_rec",
+    "device": "cpu",
+    "min_confidence": 0.65,
+    "text_suffix": "_ocr",
+    "confidence_suffix": "_ocr_confidence",
+    "batch_size": 7,
+    "upscale": 3.0,
+    "padding_x": 24,
+    "padding_y": 16,
+    "trim_whitespace": true,
+    "save_crops": true,
+    "skip_model_source_check": true,
+    "field_charsets": {
+      "student_id_written": "0123456789"
+    }
+  }
+}

@@ -21,7 +21,8 @@ COPY requirements.txt requirements.ocr.txt ./
 RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir -r requirements.ocr.txt
 COPY . .
-RUN mkdir -p /data /app/inputs /app/output
+RUN python -m recognition_assets \
+    && mkdir -p /data /app/inputs /app/output
 
 EXPOSE 8000
 VOLUME ["/data"]

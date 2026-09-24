@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "files": {
+    "assets/recognition/software-16th-abc.pdf": {
+      "sha256": "53af9763ae8be5cdd6b60fa9e52077c0e48f6b86fa6561ddf471cf1f7243e0da",
+      "bytes": 23116303
+    },
+    "assets/recognition/software-15th-a.pdf": {
+      "sha256": "d8d935e056927bf4dd1fb3e44d7e58a5ea834c3992103181e21cb94e4d85bf9c",
+      "bytes": 48762
+    },
+    "assets/recognition/omr_marker.jpg": {
+      "sha256": "61d39aab56d6c5ead514c0769528af56ca7f2b849ca26ebd6e9346f4ce704059",
+      "bytes": 5550
+    },
+    "assets/recognition/phone_scan/template.json": {
+      "sha256": "dfa2ad7934829c99b3e52f74cff4ca12a38ff6016c2af75383bdc6f408026d38",
+      "bytes": 2870
+    },
+    "assets/recognition/phone_scan/config.json": {
+      "sha256": "0ad2faa12ce0778258e61cc21a0504f1a8e9c476945f4afc8e585ccb2a94fb70",
+      "bytes": 919
+    },
+    "assets/recognition/phone_scan/evaluation.json": {
+      "sha256": "e2b40a9e8daa72376fa19f136c0d316004cfef8b691d7f70a2361bbe32f57997",
+      "bytes": 658
+    },
+    "assets/recognition/phone_scan/reference_blank.png": {
+      "sha256": "c4055f4853cb9fe11b3d94cfae6bfbd96031bbe6a4953de4d1ce7eee4eaf4741",
+      "bytes": 222551
+    }
+  }
+}

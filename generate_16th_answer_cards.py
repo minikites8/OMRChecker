@@ -10,6 +10,8 @@ import shutil
 from pathlib import Path
 from typing import Iterable
 
+from recognition_assets import MARKER_ASSET, REFERENCE_15TH_PDF
+
 from reportlab.lib.colors import HexColor, black, white
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
@@ -19,8 +21,7 @@ from reportlab.lib.utils import ImageReader
 
 ROOT = Path(__file__).resolve().parent
 OUTPUT_DIR = ROOT / "output" / "pdf" / "exam_16th_answer_card_unified_2026"
-MARKER_PATH = ROOT / "output" / "pdf" / "exam_answer_cards" / "marker_version" / "omr_marker.jpg"
-REFERENCE_15TH_PDF = ROOT / "output" / "pdf" / "exam_answer_cards" / "marker_version" / "15th软件方向二面试题A卷答题卡_定位标记版.pdf"
+MARKER_PATH = MARKER_ASSET
 PAGE_W, PAGE_H = A4
 MARGIN = 42.0
 MARKER_INSET = 25.0

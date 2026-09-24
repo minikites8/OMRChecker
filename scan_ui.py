@@ -29,6 +29,7 @@ from recognition_config import recognition_settings
 from exam_import import import_exam_and_answers
 from exam_review import apply_ai_review, apply_manual_review, attach_structured_scores, build_review_from_structured, refresh_rule_judgments, _import_variant_for_review as exam_review_variant_for_review
 from scan_templates import TemplateManager
+from recognition_assets import DEFAULT_SCAN_ROOT, validate_recognition_assets
 from platform_admin import AdminError, AdminService, require_admin
 from platform_auth import AuthError, AuthService
 from platform_config import PlatformSettings
@@ -40,7 +41,7 @@ from platform_persistence import PlatformPersistence
 PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_ROOT = Path(get_setting("OMR_DATA_ROOT", str(PROJECT_ROOT))).expanduser().resolve()
 UI_ROOT = PROJECT_ROOT / "ui"
-TEMPLATE_ROOT = PROJECT_ROOT / "inputs" / "phone_scan"
+TEMPLATE_ROOT = DEFAULT_SCAN_ROOT
 TEMPLATE_MANAGER = TemplateManager(
     PROJECT_ROOT,
     TEMPLATE_ROOT,
@@ -1266,6 +1267,7 @@ def create_server(host="127.0.0.1", port=8765):
 
 
 def run_server(host="127.0.0.1", port=8765, open_browser=False):
+    validate_recognition_assets(PROJECT_ROOT)
     AUTH_SERVICE.startup()
     PLATFORM_PERSISTENCE.startup()
     DATA_ROOT.mkdir(parents=True, exist_ok=True)

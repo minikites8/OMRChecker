@@ -18,6 +18,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from platform_auth import AuthError, AuthService
 from platform_config import PlatformSettings
 from runtime_settings import get_setting
+from recognition_assets import validate_recognition_assets
 from platform_cos import TencentCosStorage
 from platform_database import PostgresStore
 from platform_persistence import PlatformPersistence
@@ -73,6 +74,7 @@ def oidc_redirect_uri() -> str:
 
 @app.on_event("startup")
 def startup() -> None:
+    validate_recognition_assets(legacy.PROJECT_ROOT)
     auth.startup()
     persistence.startup()
 
