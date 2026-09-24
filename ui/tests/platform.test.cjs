@@ -28,6 +28,13 @@ test('paper search is trimmed and case-insensitive', () => {
   assert.equal(matchingPapers(papers,'').length,2);
   assert.equal(matchingPapers(papers,'missing').length,0);
 });
+test('paper search matches custom names while keeping legacy IDs searchable', () => {
+  const papers=[{import_id:'exam-001',name:'七年级数学期中考试'},{import_id:'exam-002',name:'English Midterm'},{import_id:'legacy'}];
+  assert.deepEqual(matchingPapers(papers,'数学'),[papers[0]]);
+  assert.deepEqual(matchingPapers(papers,' ENGLISH '),[papers[1]]);
+  assert.deepEqual(matchingPapers(papers,'exam-001'),[papers[0]]);
+  assert.deepEqual(matchingPapers(papers,'legacy'),[papers[2]]);
+});
 test('pagination handles empty and out-of-range pages', () => {
   assert.deepEqual(pageSlice([],9),{page:1,pages:1,items:[]});
   const items=Array.from({length:7},(_,i)=>i);

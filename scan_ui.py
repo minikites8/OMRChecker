@@ -17,7 +17,7 @@ import time
 import uuid
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
@@ -55,6 +55,7 @@ AUTH_SERVICE = AuthService(PLATFORM_SETTINGS, PLATFORM_DATABASE)
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf"}
 MAX_REQUEST_BYTES = 256 * 1024 * 1024
 MAX_FILE_BYTES = 24 * 1024 * 1024
+EXAM_IMPORT_LOCK = threading.RLock()
 AI_REVIEW_LOCK = threading.RLock()
 BATCH_REVIEW_LOCK = threading.RLock()
 AI_REVIEW_WORKERS = {}
@@ -220,13 +221,26 @@ def read_results(csv_path, job_id, job_root):
     return columns, rows
 
 
+def _exam_import_name(data, import_id):
+    return str(data.get("name") or "").strip() or "试卷 " + import_id
+
+
 def run_exam_import(payload):
+    name = payload.get("name")
+    if name is None:
+        name = ""
+    if not isinstance(name, str):
+        raise ValueError("试卷名称需要使用文本")
+    name = " ".join(name.split())
+    if len(name) > 120:
+        raise ValueError("试卷名称最多 120 个字符")
     exam_text = str(payload.get("exam_text", ""))
     answer_text = str(payload.get("answer_text", ""))
     if not exam_text.strip():
         raise ValueError("\u8bf7\u63d0\u4f9b\u8bd5\u5377 JSON")
     imported = import_exam_and_answers(exam_text, answer_text)
     import_id = "{}-{}".format(datetime.now().strftime("%Y%m%d-%H%M%S"), uuid.uuid4().hex[:6])
+    imported["name"] = name or "试卷 " + import_id
     import_root = IMPORT_ROOT / import_id
     import_root.mkdir(parents=True, exist_ok=False)
     normalized_path = import_root / "normalized_exam.json"
@@ -236,10 +250,13 @@ def run_exam_import(payload):
     answers_path = import_root / "answer_map.json"
     answers_path.write_text(json.dumps({"answer_map": imported["answer_map"]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     owner_user_id = str(payload.get("_actor_user_id") or "")
-    PLATFORM_PERSISTENCE.sync_tree(import_root, "exam_import", owner_user_id)
+    PLATFORM_PERSISTENCE.sync_tree(
+        import_root, "exam_import", owner_user_id, relative_prefix=Path(import_id)
+    )
     return {
         "ok": True,
         "import_id": import_id,
+        "name": imported["name"],
         "summary": imported["summary"],
         "sections": imported["exam"]["sections"],
         "answer_map": imported["answer_map"],
@@ -266,6 +283,8 @@ def list_exam_imports(limit=50):
             continue
         try:
             data = json.loads(normalized.read_text(encoding="utf-8"))
+            if data.get("deleted_at"):
+                continue
             summary = data["summary"]
             if not isinstance(summary, dict) or not isinstance(data["exam"]["sections"], list):
                 continue
@@ -273,6 +292,7 @@ def list_exam_imports(limit=50):
             continue
         imports.append({
             "import_id": directory.name,
+            "name": _exam_import_name(data, directory.name),
             "summary": summary,
             "answer_count": len(data.get("answer_map") or {}),
             "answer_missing": summary.get("answer_missing", []),
@@ -282,6 +302,35 @@ def list_exam_imports(limit=50):
         if len(imports) >= limit:
             break
     return imports
+
+
+def delete_exam_import(payload):
+    """Archive an import while preserving files used by existing grading jobs."""
+    import_id = str(payload.get("import_id") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", import_id):
+        raise ValueError("请提供有效的导入编号")
+    normalized_path = resolve_under(IMPORT_ROOT, Path(import_id) / "normalized_exam.json")
+    with EXAM_IMPORT_LOCK:
+        if not normalized_path.is_file():
+            raise FileNotFoundError("导入的试卷不存在")
+        imported = json.loads(normalized_path.read_text(encoding="utf-8"))
+        if not imported.get("deleted_at"):
+            imported["deleted_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            imported["deleted_by"] = str(payload.get("_actor_user_id") or "")
+            temporary = normalized_path.with_name(".deleting-" + uuid.uuid4().hex + ".json")
+            try:
+                temporary.write_text(
+                    json.dumps(imported, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+                )
+                # Upload the tombstone to this import's own COS key before publishing locally.
+                PLATFORM_PERSISTENCE.sync_file(
+                    temporary, "exam_import", imported["deleted_by"],
+                    Path(import_id) / "normalized_exam.json",
+                )
+                temporary.replace(normalized_path)
+            finally:
+                temporary.unlink(missing_ok=True)
+    return {"ok": True, "import_id": import_id, "deleted": True}
 
 
 def _review_import(payload):
@@ -294,6 +343,8 @@ def _review_import(payload):
     if not normalized_path.is_file():
         raise ValueError("导入的试卷不存在")
     imported = json.loads(normalized_path.read_text(encoding="utf-8"))
+    if imported.get("deleted_at"):
+        raise ValueError("试卷已删除，请选择其他试卷")
     return import_id, normalized_path, imported
 
 
@@ -1063,7 +1114,7 @@ class ScanUIHandler(BaseHTTPRequestHandler):
             self.send_json(400, {"ok": False, "error": str(error)})
     def do_POST(self):
         route = urlparse(self.path).path
-        if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/exam/import", "/api/review", "/api/review/batch", "/api/review/ai-judge", "/api/review/confirm", "/api/review/confirm-grade", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
+        if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/exam/import", "/api/exam/delete", "/api/review", "/api/review/batch", "/api/review/ai-judge", "/api/review/confirm", "/api/review/confirm-grade", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
             self.send_json(404, {"ok": False, "error": "接口不存在"})
             return
         if route != "/api/auth/login" and not self._authorize(route):
@@ -1094,6 +1145,8 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                 result = CANDIDATE_MANAGER.start(payload)
             elif route == "/api/exam/import":
                 result = run_exam_import(payload)
+            elif route == "/api/exam/delete":
+                result = delete_exam_import(payload)
             elif route == "/api/sheets":
                 package = generate_sheet_package(payload, output_root=SHEETS_ROOT)
                 result = {
@@ -1124,6 +1177,8 @@ class ScanUIHandler(BaseHTTPRequestHandler):
             self.send_json(200, result)
         except AuthError as error:
             self.send_json(401, {"ok": False, "error": str(error), "login_url": "/login"})
+        except FileNotFoundError as error:
+            self.send_json(404, {"ok": False, "error": str(error)})
         except (ValueError, json.JSONDecodeError) as error:
             self.send_json(400, {"ok": False, "error": str(error)})
         except ScanFailure as error:

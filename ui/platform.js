@@ -20,7 +20,7 @@
   }
   function matchingPapers(papers, query) {
     const search = String(query || '').trim().toLowerCase();
-    return papers.filter(entry => String(entry.import_id || '').toLowerCase().includes(search));
+    return papers.filter(entry => [entry.name, entry.import_id].some(value => String(value || '').toLowerCase().includes(search)));
   }
   function pageSlice(items, requested, size = 6) {
     const pages = Math.max(1, Math.ceil(items.length / size));
@@ -91,7 +91,7 @@
   function openImport() {
     $('importEditor').hidden = false;
     $('importEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    $('examImportText').focus({ preventScroll: true });
+    $('examImportName').focus({ preventScroll: true });
   }
   $('openImport').addEventListener('click', openImport);
   function emptyRow(body, colspan, message) {
@@ -110,7 +110,7 @@
     const body = $('paperRows'); body.replaceChildren();
     page.items.forEach(entry => {
       const row = element('tr'), summary = entry.summary || {};
-      const titleCell = element('td'), title = element('div', 'table-title', '结构化试卷');
+      const titleCell = element('td'), title = element('div', 'table-title', entry.name || '试卷 ' + entry.import_id);
       const sub = element('small', 'table-subtitle', formatImportDate(entry.import_id));
       const id = element('small', 'table-id', entry.import_id); titleCell.append(title, sub, id);
       const count = element('td', '', (summary.question_count || 0) + ' 题');
@@ -127,7 +127,14 @@
       const download = element('a', 'text-link secondary-link', '下载');
       download.href = '/imports/' + encodeURIComponent(entry.import_id) + '/normalized_exam.json'; download.download = '';
       download.setAttribute('aria-label', '下载试卷 ' + entry.import_id);
-      actionWrap.append(use, download); actions.append(actionWrap); row.append(titleCell, count, total, answers, actions); body.append(row);
+      const remove = element('button', 'text-link secondary-link', '删除'); remove.type = 'button';
+      remove.setAttribute('aria-label', '删除试卷 ' + (entry.name || entry.import_id));
+      remove.addEventListener('click', async () => {
+        remove.disabled = true;
+        try { await deleteExamImport(entry.import_id, entry.name || entry.import_id); }
+        finally { remove.disabled = false; }
+      });
+      actionWrap.append(use, download, remove); actions.append(actionWrap); row.append(titleCell, count, total, answers, actions); body.append(row);
     });
     if (!filtered.length) emptyRow(body, 5, model.imports.length ? '没有匹配的试卷，请调整搜索内容。' : '试卷库为空，点击“导入试卷”开始。');
   }

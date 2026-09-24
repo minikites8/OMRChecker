@@ -214,7 +214,23 @@ def sheets(request: Request, payload: dict) -> dict:
 @app.post("/api/exam/import")
 def exam_import(request: Request, payload: dict) -> dict:
     user = current_user(request)
-    return legacy.run_exam_import(actor_payload(payload, user))
+    try:
+        return legacy.run_exam_import(actor_payload(payload, user))
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
+@app.post("/api/exam/delete")
+def exam_delete(request: Request, payload: dict) -> dict:
+    user = current_user(request)
+    try:
+        return legacy.delete_exam_import(actor_payload(payload, user))
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=503, detail="试卷删除暂时失败，请稍后重试") from error
 
 
 @app.post("/api/review")

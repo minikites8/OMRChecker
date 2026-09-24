@@ -62,13 +62,19 @@ class PlatformPersistence:
         )
         return object_key
 
-    def sync_tree(self, root: Path, kind: str, owner_user_id: str = "") -> list[str]:
+    def sync_tree(
+        self, root: Path, kind: str, owner_user_id: str = "",
+        relative_prefix: Optional[Path] = None,
+    ) -> list[str]:
         if not self.enabled:
             return []
         root = Path(root)
         keys = []
         for path in sorted(item for item in root.rglob("*") if item.is_file()):
-            keys.append(self.sync_file(path, kind, owner_user_id, path.relative_to(root)))
+            relative = path.relative_to(root)
+            if relative_prefix is not None:
+                relative = Path(relative_prefix) / relative
+            keys.append(self.sync_file(path, kind, owner_user_id, relative))
         return keys
 
     def record_job(self, job_id: str, owner_user_id: str, kind: str, status: str, payload: dict) -> None:
