@@ -1,0 +1,54 @@
+AI HTTP retry verification
+Date: 2026-09-25
+Branch: master
+Base commit: abc3ebc (fix: keep review polling alive)
+Changed fields:
+- ai_judge.py: HTTP 408/425/429/500/502/503/504/529 requests use Retry-After or exponential delays of 1s, 2s, 4s, capped at 30s; default max retries is 3.
+- runtime_settings.py: HANDWRITING_AI_MAX_RETRIES is available in the AI service settings with a live range of 0-6.
+- src/tests/test_ai_judge.py: covers HTTP 429 followed by HTTP 503 and a successful retry.
+- docs/admin-panel.md and deploy/README.md: service setting count updated to 38.
+
+Artifacts:
+MODIFIED_FILE: D:\Programs\OMRChecker\verification\ai-retry-fix\MODIFIED_FILE
+DIFF_FILE: D:\Programs\OMRChecker\verification\ai-retry-fix\DIFF_FILE
+VERIFICATION.txt: D:\Programs\OMRChecker\verification\ai-retry-fix\VERIFICATION.txt
+ROLLBACK.sh: D:\Programs\OMRChecker\verification\ai-retry-fix\ROLLBACK.sh
+
+BASELINE
+Command:
+.\.venv\Scripts\python.exe -m pytest src/tests/test_ai_judge.py -o addopts= -q
+node --test ui/tests/*.test.cjs
+Input: detached worktree at HEAD abc3ebc before the retry change
+Literal output/result:
+35 passed in 0.52s
+76 tests, 76 passed
+Exit status: 0
+
+MODIFIED
+Command:
+.\.venv\Scripts\python.exe -m pytest src/tests/test_ai_judge.py src/tests/test_runtime_settings.py src/tests/test_review_endpoint.py src/tests/test_scan_ui.py src/tests/test_review_async.py -o addopts= -q
+node --test ui/tests/*.test.cjs
+git diff --check
+Input: current worktree with AI retry implementation, setting registration, tests, and documentation
+Literal output/result:
+121 passed, 3 warnings in 10.25s
+76 tests, 76 passed
+DIFF_CHECK_EXIT=0
+Exit status: 0
+
+ROLLBACK
+Command:
+& 'C:\Program Files\Git\bin\bash.exe' 'D:/Programs/OMRChecker/verification/ai-retry-fix/ROLLBACK.sh' 'D:/Programs/OMRChecker/tmp/verification-ai-retry-rollback'
+Input: detached HEAD copy with all modified files copied into it
+Literal output/result:
+ROLLBACK_RESTORED=D:/Programs/OMRChecker/tmp/verification-ai-retry-rollback
+ROLLBACK_EXIT=0
+Restored behavior/status: the rollback target matched HEAD for ai_judge.py, runtime_settings.py, src/tests/test_ai_judge.py, src/tests/test_runtime_settings.py, docs/admin-panel.md, and deploy/README.md; git diff --exit-code returned 0. The active master worktree keeps the retry implementation.
+Exit status: 0
+
+SUPPLEMENTAL
+Command:
+.\.venv\Scripts\python.exe -m pytest src/tests -o addopts= -q
+Literal output/result:
+Collection reached 3 missing dependency errors: freezegun is absent in the local virtual environment.
+Exit status: 2

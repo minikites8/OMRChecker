@@ -32,6 +32,7 @@ FIELDS = [
     field("HANDWRITING_AI_API_KEY", "ai", "AI API Key", secret=True, apply="live", aliases=("OPENAI_API_KEY",)),
     field("HANDWRITING_AI_TIMEOUT", "ai", "AI 超时（秒）", "integer", 180, apply="live", minimum=10, maximum=300),
     field("HANDWRITING_AI_CONCURRENCY", "ai", "单任务 AI 请求并发", "integer", 3, apply="live", minimum=1, maximum=8),
+    field("HANDWRITING_AI_MAX_RETRIES", "ai", "AI 临时错误重试次数", "integer", 3, apply="live", minimum=0, maximum=6, help="针对 HTTP 408、429、500、502、503、504、529 使用指数退避重试。"),
     field("OMR_LOCAL_OCR_ENABLED", "recognition", "默认启用本地 OCR", "boolean", True, apply="live", help="关闭后默认使用仅 AI 识别；任务表单仍可单独选择识别方式。"),
     field("OMR_REVIEW_WORKERS", "recognition", "批改任务工作线程", "integer", min(4, max(2, (os.cpu_count() or 2) // 2)), minimum=1, maximum=4),
     field("OMR_AI_WORKERS", "recognition", "AI 后台任务工作线程", "integer", 3, minimum=1, maximum=4),

@@ -46,7 +46,7 @@ def test_schema_covers_existing_deployment_environment_fields():
     for line in Path("deploy/.env.example").read_text(encoding="utf-8").splitlines():
         if line and not line.startswith("#"):
             assert line.split("=", 1)[0] in supported
-    assert len(config.FIELDS) == 37
+    assert len(config.FIELDS) == 38
     assert len(config.DEFINITIONS) == len(config.FIELDS)
 
 
@@ -162,7 +162,7 @@ def test_all_registered_fields_can_be_saved_and_read(store, tmp_path):
                    "TENCENT_COS_SECRET_ID": "secret-id", "TENCENT_COS_SECRET_KEY": "cos-private", "TENCENT_COS_REGION": "region",
                    "TENCENT_COS_BUCKET": "bucket", "TENCENT_COS_APPID": "appid"})
     result = save(store, values)
-    assert len(result["changed_keys"]) == 37
+    assert len(result["changed_keys"]) == 38
     assert store.path.exists() and config.settings_path() == store.path
     loaded = PlatformSettings.from_env()
     assert loaded.cos_bucket == "bucket" and loaded.data_root == tmp_path / "business"
@@ -247,7 +247,7 @@ def test_only_admin_can_access_settings(client, actor, code, method, store):
 
 def test_settings_api_roundtrip_secret_redaction_and_conflict(client, store):
     status, state = client("GET")
-    assert status == 200 and len(state["fields"]) == 37
+    assert status == 200 and len(state["fields"]) == 38
     code, result = client("PATCH", payload={"revision": state["revision"], "values": {"HANDWRITING_AI_API_KEY": "admin-key-sensitive", "HANDWRITING_AI_MODEL": "api-model"}})
     assert code == 200 and result["revision"] == 1
     assert "admin-key-sensitive" not in json.dumps(result)

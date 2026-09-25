@@ -1,0 +1,259 @@
+diff --git a/ai_judge.py b/ai_judge.py
+index 9c22e0d..2a3f462 100644
+--- a/ai_judge.py
++++ b/ai_judge.py
+@@ -6,6 +6,7 @@ import base64
+ import json
+ import math
+ import tempfile
++import time
+ from types import SimpleNamespace
+ import os
+ from runtime_settings import get_setting, get_settings_store, resolve_value, text_value
+@@ -21,6 +22,10 @@ DEFAULT_MODEL = "gpt-4o-mini"
+ DEFAULT_ENDPOINT = "https://api.openai.com/v1/chat/completions"
+ MAX_SOURCE_CHARS = 800
+ MAX_RECOGNIZED_CHARS = 1200
++RETRYABLE_AI_HTTP_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504, 529})
++DEFAULT_AI_MAX_RETRIES = 3
++DEFAULT_AI_RETRY_BASE_SECONDS = 1.0
++MAX_AI_RETRY_DELAY_SECONDS = 30.0
+ _AI_PRINT_LOCK = threading.Lock()
+
+
+@@ -43,9 +48,14 @@ def ai_config():
+         concurrency_count = max(1, min(8, int(value("HANDWRITING_AI_CONCURRENCY", "3"))))
+     except ValueError:
+         concurrency_count = 3
++    try:
++        max_retries = max(0, min(6, int(value("HANDWRITING_AI_MAX_RETRIES", str(DEFAULT_AI_MAX_RETRIES)))))
++    except ValueError:
++        max_retries = DEFAULT_AI_MAX_RETRIES
+     return {
+         "endpoint": endpoint, "model": model, "api_key": api_key,
+         "timeout": timeout_seconds, "concurrency": concurrency_count,
++        "max_retries": max_retries,
+     }
+
+
+@@ -288,6 +298,18 @@ def _read_visual_evidence(config, items):
+     return evidence
+
+
++def _retry_after_seconds(error, fallback):
++    """读取服务端 Retry-After，并将退避时间限制在可控范围内。"""
++    headers = getattr(error, "headers", None)
++    raw_value = headers.get("Retry-After") if headers is not None else None
++    if raw_value:
++        try:
++            return min(MAX_AI_RETRY_DELAY_SECONDS, max(0.0, float(str(raw_value).strip())))
++        except (TypeError, ValueError):
++            pass
++    return min(MAX_AI_RETRY_DELAY_SECONDS, max(0.0, float(fallback)))
++
++
+ def _request(config, items):
+     for item in items:
+         paths = item.get("handwriting_images", [])[:2]
+@@ -314,34 +336,48 @@ def _request(config, items):
+         method="POST",
+     )
+     group_label = str(items[0].get("major_question") or _group_key(items[0]))
+-    try:
+-        with urlopen(request, timeout=config["timeout"]) as response:
+-            raw_body = response.read().decode("utf-8", errors="replace")
++    max_retries = max(0, int(config.get("max_retries", DEFAULT_AI_MAX_RETRIES) if config.get("max_retries") is not None else DEFAULT_AI_MAX_RETRIES))
++    retry_base_seconds = DEFAULT_AI_RETRY_BASE_SECONDS
++    for attempt in range(max_retries + 1):
++        try:
++            with urlopen(request, timeout=config["timeout"]) as response:
++                raw_body = response.read().decode("utf-8", errors="replace")
++                with _AI_PRINT_LOCK:
++                    print("[AI响应][大题 {}][{}] HTTP{}\n{}".format(
++                        group_label, "原图转录" if transcription else "判题", getattr(response, "status", "?"), raw_body
++                    ), flush=True)
++                return json.loads(raw_body)
++        except HTTPError as error:
++            try:
++                detail = error.read().decode("utf-8", errors="replace")
++            except OSError:
++                detail = "响应正文读取超时"
+             with _AI_PRINT_LOCK:
+-                print("[AI响应][大题 {}][{}] HTTP{}\n{}".format(
+-                    group_label, "原图转录" if transcription else "判题", getattr(response, "status", "?"), raw_body
++                print("[AI响应][大题 {}] HTTP{}（第 {}/{} 次请求）\n{}".format(
++                    group_label, error.code, attempt + 1, max_retries + 1, detail
+                 ), flush=True)
+-            return json.loads(raw_body)
+-    except HTTPError as error:
+-        try:
+-            detail = error.read().decode("utf-8", errors="replace")
+-        except OSError:
+-            detail = "响应正文读取超时"
+-        with _AI_PRINT_LOCK:
+-            print("[AI响应][大题 {}] HTTP{}\n{}".format(group_label, error.code, detail), flush=True)
+-        raise RuntimeError("AI接口返回HTTP{}：{}".format(error.code, detail[:500])) from error
+-    except URLError as error:
+-        with _AI_PRINT_LOCK:
+-            print("[AI响应][大题 {}] 连接失败：{}".format(group_label, error.reason), flush=True)
+-        raise RuntimeError("AI接口连接失败：{}".format(error.reason)) from error
+-    except TimeoutError as error:
+-        with _AI_PRINT_LOCK:
+-            print("[AI响应][大题 {}] 响应超时：{}".format(group_label, error), flush=True)
+-        raise RuntimeError("AI接口响应超时（{}秒），请稍后重试或调整 HANDWRITING_AI_TIMEOUT".format(config["timeout"])) from error
+-    except OSError as error:
+-        with _AI_PRINT_LOCK:
+-            print("[AI响应][大题 {}] 读取失败：{}".format(group_label, error), flush=True)
+-        raise RuntimeError("AI接口读取失败：{}".format(error)) from error
++            can_retry = error.code in RETRYABLE_AI_HTTP_STATUS and attempt < max_retries
++            if can_retry:
++                delay = _retry_after_seconds(error, retry_base_seconds * (2 ** attempt))
++                with _AI_PRINT_LOCK:
++                    print("[AI重试][大题 {}] HTTP{}，第 {} 次重试，等待 {} 秒".format(
++                        group_label, error.code, attempt + 1, delay
++                    ), flush=True)
++                time.sleep(delay)
++                continue
++            raise RuntimeError("AI接口返回HTTP{}：{}".format(error.code, detail[:500])) from error
++        except URLError as error:
++            with _AI_PRINT_LOCK:
++                print("[AI响应][大题 {}] 连接失败：{}".format(group_label, error.reason), flush=True)
++            raise RuntimeError("AI接口连接失败：{}".format(error.reason)) from error
++        except TimeoutError as error:
++            with _AI_PRINT_LOCK:
++                print("[AI响应][大题 {}] 响应超时：{}".format(group_label, error), flush=True)
++            raise RuntimeError("AI接口响应超时（{}秒），请稍后重试或调整 HANDWRITING_AI_TIMEOUT".format(config["timeout"])) from error
++        except OSError as error:
++            with _AI_PRINT_LOCK:
++                print("[AI响应][大题 {}] 读取失败：{}".format(group_label, error), flush=True)
++            raise RuntimeError("AI接口读取失败：{}".format(error)) from error
+
+
+ def _group_key(item):
+diff --git a/deploy/README.md b/deploy/README.md
+index 6210dde..f0593c6 100644
+--- a/deploy/README.md
++++ b/deploy/README.md
+@@ -57,7 +57,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
+
+ ### 管理面板配置覆盖
+
+-管理员可在「管理面板 → 服务参数配置」保存 AI、OCR、并发、身份验证、数据库、COS、监听地址和端口等 37 项服务参数。保存值优先于容器环境变量，选择恢复环境/默认值即可移除覆盖。
++管理员可在「管理面板 → 服务参数配置」保存 AI、OCR、并发、身份验证、数据库、COS、监听地址和端口等 38 项服务参数。保存值优先于容器环境变量，选择恢复环境/默认值即可移除覆盖。
+
+ 默认配置文件 `/data/platform-settings.json` 使用现有 `omr-data` 卷持久化；变更配置文件位置使用启动变量 `OMR_SETTINGS_FILE`，并把对应目录挂载到持久卷。该文件包含服务凭据，请为目录设置合适的访问权限与备份策略。
+
+diff --git a/docs/admin-panel.md b/docs/admin-panel.md
+index 9c23b6a..0ccd95e 100644
+--- a/docs/admin-panel.md
++++ b/docs/admin-panel.md
+@@ -59,7 +59,7 @@ node --test ui/tests/*.test.cjs
+
+ ## 服务参数配置
+
+-「管理面板 → 服务参数配置」提供 37 个参数，分为 AI 服务、识别与资源、登录与会话、OIDC、数据存储、腾讯云 COS、服务与跨域七组。本地模式也可使用配置面板；所有配置接口沿用管理员角色校验。
++「管理面板 → 服务参数配置」提供 38 个参数，分为 AI 服务、识别与资源、登录与会话、OIDC、数据存储、腾讯云 COS、服务与跨域七组。本地模式也可使用配置面板；所有配置接口沿用管理员角色校验。
+
+ - **即时生效**：AI 接口地址、模型、API Key、请求超时、单任务 AI 并发，以及默认 OCR 模式。新请求读取最新配置；每次 AI 请求从同一个配置版本读取接口、模型和密钥。任务表单显式选择的识别模式继续优先。
+ - **重启生效**：任务线程池、上传限制、登录方式、会话、OIDC、数据库、COS、数据目录、监听地址、端口和跨域源。页面显示待重启项；重启后的启动入口读取保存值。现有数据保留在原目录，数据库与目录切换按实际部署准备数据。
+diff --git a/runtime_settings.py b/runtime_settings.py
+index 6b8115a..a56fdf6 100644
+--- a/runtime_settings.py
++++ b/runtime_settings.py
+@@ -32,6 +32,7 @@ FIELDS = [
+     field("HANDWRITING_AI_API_KEY", "ai", "AI API Key", secret=True, apply="live", aliases=("OPENAI_API_KEY",)),
+     field("HANDWRITING_AI_TIMEOUT", "ai", "AI 超时（秒）", "integer", 180, apply="live", minimum=10, maximum=300),
+     field("HANDWRITING_AI_CONCURRENCY", "ai", "单任务 AI 请求并发", "integer", 3, apply="live", minimum=1, maximum=8),
++    field("HANDWRITING_AI_MAX_RETRIES", "ai", "AI 临时错误重试次数", "integer", 3, apply="live", minimum=0, maximum=6, help="针对 HTTP 408、429、500、502、503、504、529 使用指数退避重试。"),
+     field("OMR_LOCAL_OCR_ENABLED", "recognition", "默认启用本地 OCR", "boolean", True, apply="live", help="关闭后默认使用仅 AI 识别；任务表单仍可单独选择识别方式。"),
+     field("OMR_REVIEW_WORKERS", "recognition", "批改任务工作线程", "integer", min(4, max(2, (os.cpu_count() or 2) // 2)), minimum=1, maximum=4),
+     field("OMR_AI_WORKERS", "recognition", "AI 后台任务工作线程", "integer", 3, minimum=1, maximum=4),
+diff --git a/src/tests/test_ai_judge.py b/src/tests/test_ai_judge.py
+index b81c693..c33c4a5 100644
+--- a/src/tests/test_ai_judge.py
++++ b/src/tests/test_ai_judge.py
+@@ -241,7 +241,7 @@ def test_ai_http_error_response_is_printed_to_console(monkeypatch, capsys, tmp_p
+
+     monkeypatch.setattr(ai_judge, "urlopen", fake_urlopen)
+     try:
+-        ai_judge._request(ai_judge.ai_config(), [{"question": "31", "recognized_text": "A", "handwriting_images": image_fixture(tmp_path)}])
++        ai_judge._request({**ai_judge.ai_config(), "max_retries": 0}, [{"question": "31", "recognized_text": "A", "handwriting_images": image_fixture(tmp_path)}])
+     except RuntimeError as error:
+         assert "HTTP429" in str(error)
+     output = capsys.readouterr().out
+@@ -250,6 +250,44 @@ def test_ai_http_error_response_is_printed_to_console(monkeypatch, capsys, tmp_p
+
+
+
++def test_ai_http_429_and_503_use_exponential_backoff(monkeypatch, capsys, tmp_path):
++    from email.message import Message
++    from io import BytesIO
++    from urllib.error import HTTPError
++
++    monkeypatch.setenv("HANDWRITING_AI_API_KEY", "test-key")
++    payload = {"choices": [{"message": {"content": json.dumps({"results": []})}}]}
++    calls = []
++    delays = []
++
++    def fake_urlopen(request, timeout):
++        calls.append(timeout)
++        if len(calls) == 1:
++            headers = Message()
++            headers["Retry-After"] = "0.25"
++            raise HTTPError(request.full_url, 429, "Too Many Requests", headers, BytesIO(b'{"error":"rate limit"}'))
++        if len(calls) == 2:
++            raise HTTPError(request.full_url, 503, "Service Unavailable", None, BytesIO(b'{"error":"busy"}'))
++        return FakeResponse(payload)
++
++    monkeypatch.setattr(ai_judge, "urlopen", fake_urlopen)
++    monkeypatch.setattr(ai_judge.time, "sleep", delays.append)
++    result = ai_judge._request(
++        {**ai_judge.ai_config(), "max_retries": 3},
++        [{"question": "31", "recognized_text": "A", "handwriting_images": image_fixture(tmp_path)}],
++    )
++
++    assert len(calls) == 3
++    assert delays == [0.25, 2.0]
++    assert result == payload
++    output = capsys.readouterr().out
++    assert "[AI响应][大题 31] HTTP429" in output
++    assert "[AI响应][大题 31] HTTP503" in output
++    assert "[AI重试][大题 31] HTTP429" in output
++    assert "[AI重试][大题 31] HTTP503" in output
++
++
++
+ def test_ai_prompt_marks_correction_questions_as_strict():
+     payload = ai_judge._prompt_items([{
+         "question": "48", "source_content": "改正第11行", "expected_answer": "11. return *max;",
+diff --git a/src/tests/test_runtime_settings.py b/src/tests/test_runtime_settings.py
+index dfe9eeb..3a826b1 100644
+--- a/src/tests/test_runtime_settings.py
++++ b/src/tests/test_runtime_settings.py
+@@ -46,7 +46,7 @@ def test_schema_covers_existing_deployment_environment_fields():
+     for line in Path("deploy/.env.example").read_text(encoding="utf-8").splitlines():
+         if line and not line.startswith("#"):
+             assert line.split("=", 1)[0] in supported
+-    assert len(config.FIELDS) == 37
++    assert len(config.FIELDS) == 38
+     assert len(config.DEFINITIONS) == len(config.FIELDS)
+
+
+@@ -162,7 +162,7 @@ def test_all_registered_fields_can_be_saved_and_read(store, tmp_path):
+                    "TENCENT_COS_SECRET_ID": "secret-id", "TENCENT_COS_SECRET_KEY": "cos-private", "TENCENT_COS_REGION": "region",
+                    "TENCENT_COS_BUCKET": "bucket", "TENCENT_COS_APPID": "appid"})
+     result = save(store, values)
+-    assert len(result["changed_keys"]) == 37
++    assert len(result["changed_keys"]) == 38
+     assert store.path.exists() and config.settings_path() == store.path
+     loaded = PlatformSettings.from_env()
+     assert loaded.cos_bucket == "bucket" and loaded.data_root == tmp_path / "business"
+@@ -247,7 +247,7 @@ def test_only_admin_can_access_settings(client, actor, code, method, store):
+
+ def test_settings_api_roundtrip_secret_redaction_and_conflict(client, store):
+     status, state = client("GET")
+-    assert status == 200 and len(state["fields"]) == 37
++    assert status == 200 and len(state["fields"]) == 38
+     code, result = client("PATCH", payload={"revision": state["revision"], "values": {"HANDWRITING_AI_API_KEY": "admin-key-sensitive", "HANDWRITING_AI_MODEL": "api-model"}})
+     assert code == 200 and result["revision"] == 1
+     assert "admin-key-sensitive" not in json.dumps(result)

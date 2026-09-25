@@ -241,12 +241,50 @@ def test_ai_http_error_response_is_printed_to_console(monkeypatch, capsys, tmp_p
 
     monkeypatch.setattr(ai_judge, "urlopen", fake_urlopen)
     try:
-        ai_judge._request(ai_judge.ai_config(), [{"question": "31", "recognized_text": "A", "handwriting_images": image_fixture(tmp_path)}])
+        ai_judge._request({**ai_judge.ai_config(), "max_retries": 0}, [{"question": "31", "recognized_text": "A", "handwriting_images": image_fixture(tmp_path)}])
     except RuntimeError as error:
         assert "HTTP429" in str(error)
     output = capsys.readouterr().out
     assert "[AI响应][大题 31] HTTP429" in output
     assert '"rate limit"' in output
+
+
+
+def test_ai_http_429_and_503_use_exponential_backoff(monkeypatch, capsys, tmp_path):
+    from email.message import Message
+    from io import BytesIO
+    from urllib.error import HTTPError
+
+    monkeypatch.setenv("HANDWRITING_AI_API_KEY", "test-key")
+    payload = {"choices": [{"message": {"content": json.dumps({"results": []})}}]}
+    calls = []
+    delays = []
+
+    def fake_urlopen(request, timeout):
+        calls.append(timeout)
+        if len(calls) == 1:
+            headers = Message()
+            headers["Retry-After"] = "0.25"
+            raise HTTPError(request.full_url, 429, "Too Many Requests", headers, BytesIO(b'{"error":"rate limit"}'))
+        if len(calls) == 2:
+            raise HTTPError(request.full_url, 503, "Service Unavailable", None, BytesIO(b'{"error":"busy"}'))
+        return FakeResponse(payload)
+
+    monkeypatch.setattr(ai_judge, "urlopen", fake_urlopen)
+    monkeypatch.setattr(ai_judge.time, "sleep", delays.append)
+    result = ai_judge._request(
+        {**ai_judge.ai_config(), "max_retries": 3},
+        [{"question": "31", "recognized_text": "A", "handwriting_images": image_fixture(tmp_path)}],
+    )
+
+    assert len(calls) == 3
+    assert delays == [0.25, 2.0]
+    assert result == payload
+    output = capsys.readouterr().out
+    assert "[AI响应][大题 31] HTTP429" in output
+    assert "[AI响应][大题 31] HTTP503" in output
+    assert "[AI重试][大题 31] HTTP429" in output
+    assert "[AI重试][大题 31] HTTP503" in output
 
 
 
