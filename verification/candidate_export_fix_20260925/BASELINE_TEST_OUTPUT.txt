@@ -1,0 +1,8 @@
+.........warning: The `fitz` API is deprecated and will be removed in future. Use `import pymupdf` instead.
+..........[scan-ui] "GET /api/candidates HTTP/1.1" 200 -
+[scan-ui] "POST /api/candidates/save HTTP/1.1" 200 -
+[scan-ui] "POST /api/candidates/recognize HTTP/1.1" 200 -
+....[scan-ui] "POST /api/review/confirm-grade HTTP/1.1" 200 -
+[scan-ui] "GET /api/candidates/export.json?review_id=review-01 HTTP/1.1" 200 -
+[scan-ui] "GET /api/candidates/export.json?review_id=review-01&review_id=review-02 HTTP/1.1" 200 -
+......

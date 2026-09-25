@@ -1,0 +1,7 @@
+changed_branch=single-question-ai
+changed_fields=exam_review.apply_ai_review_question; scan_ui.start_ai_question_review; POST /api/review/ai-judge-question; ui requestAiQuestion and per-item button
+MODIFIED_FILE=exam_review.py, scan_ui.py, backend/app.py, ui/app.js, ui/app.css, ui/index.html, src/tests/test_ai_single_question.py, ui/tests/single-ai.test.cjs
+DIFF_FILE=DIFF_FILE
+VERIFICATION=VERIFICATION.txt
+ROLLBACK=ROLLBACK.sh
+state=main workspace remains modified after rollback validation on a separate copy

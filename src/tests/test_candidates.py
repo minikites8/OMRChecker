@@ -181,6 +181,19 @@ def test_grade_confirmation_blockers_and_candidate_status(tmp_path):
     assert candidate_record(review, tmp_path)['grade_confirmation_status'] == '已确认'
 
 
+def test_selected_scored_candidate_exports_before_grade_confirmation(tmp_path, monkeypatch):
+    import scan_ui
+    manager, load, path = manager_fixture(tmp_path)
+    monkeypatch.setattr(scan_ui, 'CANDIDATE_MANAGER', manager)
+    review = load('review-01')[2]
+    review['score_summary'] = {'total_score': 83, 'possible_score': 100}
+    path.write_text(json.dumps(review, ensure_ascii=False), encoding='utf-8')
+    exported = scan_ui.export_confirmed_grades(['review-01'])
+    assert len(exported) == 1
+    assert exported[0]['student_name'] == ''
+    assert exported[0]['questions'] == [{'question_id': 1, 'score': 0, 'remark': '待复核'}]
+
+
 def test_confirm_grade_and_export_only_confirmed_records(tmp_path, monkeypatch):
     import scan_ui
     manager, load, path = manager_fixture(tmp_path)
@@ -195,11 +208,10 @@ def test_confirm_grade_and_export_only_confirmed_records(tmp_path, monkeypatch):
     assert confirmed['grade_confirmed'] is True
     assert confirmed['grade_confirmation_status'] == '已确认'
     exported = scan_ui.export_confirmed_grades()
-    assert exported['count'] == 1
-    assert exported['grades'][0]['score'] == 5
-    assert exported['grades'][0]['confirmed_at']
-    assert exported['grades'][0]['question_scores'][0]['awarded_score'] == 2
-    assert exported['grades'][0]['question_scores'][1]['awarded_score'] == 3
+    assert len(exported) == 1
+    assert exported[0]['student_name'] == ''
+    assert exported[0]['questions'][0]['score'] == 2
+    assert exported[0]['questions'][1]['score'] == 3
 
 
 def test_confirm_grade_rejects_pending_review(tmp_path, monkeypatch):
@@ -243,10 +255,11 @@ def test_grade_confirmation_http_endpoints(tmp_path, monkeypatch):
         with urlopen(base + '/api/candidates/export.json?review_id=review-01') as response:
             exported = json.load(response)
             assert response.headers['Content-Disposition'].startswith('attachment;')
-        assert exported['count'] == 1 and exported['grades'][0]['score'] == 2
+        assert isinstance(exported, list) and len(exported) == 1
+        assert exported[0]['questions'][0]['score'] == 2
         with urlopen(base + '/api/candidates/export.json?review_id=review-01&review_id=review-02') as response:
             selected = json.load(response)
-        assert selected['count'] == 2
+        assert isinstance(selected, list) and len(selected) == 2
     finally:
         server.shutdown()
         server.server_close()

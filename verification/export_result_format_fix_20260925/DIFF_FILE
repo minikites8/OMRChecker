@@ -1,0 +1,182 @@
+--- scan_ui.py ---
+diff --git a/D:/Programs/OMRChecker/verification/export_result_format_fix_20260925/baseline/scan_ui.py b/D:/Programs/OMRChecker/scan_ui.py
+index 8cf36ca..4277c1a 100644
+--- a/D:/Programs/OMRChecker/verification/export_result_format_fix_20260925/baseline/scan_ui.py
++++ b/D:/Programs/OMRChecker/scan_ui.py
+@@ -885,6 +885,21 @@ def _has_exportable_score(record):
+     return math.isfinite(total) and math.isfinite(possible) and possible > 0
+ 
+ 
++def _export_question_result(question):
++    question_id = question.get("question_id")
++    if question_id in (None, ""):
++        question_id = question.get("question", "")
++    if isinstance(question_id, str) and question_id.strip().isdigit():
++        question_id = int(question_id.strip())
++    awarded_score = question.get("awarded_score")
++    if awarded_score is None:
++        awarded_score = question.get("score", 0)
++    status = str(question.get("status") or "").strip()
++    score_basis = str(question.get("score_basis") or "").strip()
++    remark = "；".join(value for value in (status, score_basis) if value)
++    return {"question_id": question_id, "score": awarded_score, "remark": remark}
++
++
+ def export_confirmed_grades(selected_ids=None):
+     records, _skipped = CANDIDATE_MANAGER.records()
+     selected = {str(value).strip() for value in (selected_ids or []) if str(value).strip()}
+@@ -903,30 +918,18 @@ def export_confirmed_grades(selected_ids=None):
+                 continue
+         elif not record.get("grade_confirmed") or not _has_exportable_score(record):
+             continue
+-        summary = record.get("score_summary") or {}
+-        possible = float(summary.get("possible_score", 0) or 0)
+-        total = float(summary.get("total_score", 0) or 0)
+         grades.append({
+-            "review_id": record.get("review_id", ""),
+-            "student_name": record.get("student_name", ""),
++            "student_name": str(record.get("student_name") or ""),
++            "student_id": str(record.get("student_id") or ""),
+             "session_id": record.get("session_id", ""),
+-            "student_id": record.get("student_id", ""),
+-            "paper_type": record.get("paper_type", ""),
+-            "score": summary.get("total_score", 0),
+-            "possible_score": summary.get("possible_score", 0),
+-            "percentage": round(total / possible * 100, 2) if possible else 0,
+-            "objective_score": summary.get("objective_score", 0),
+-            "text_score": summary.get("text_score", 0),
+-            "failed_score": summary.get("failed_score", 0),
+-            "grade_confirmed": bool(record.get("grade_confirmed")),
+-            "grade_confirmation_status": record.get("grade_confirmation_status", "待确认"),
+-            "grade_blockers": record.get("grade_blockers", []),
+-            "confirmed_at": record.get("grade_confirmed_at", ""),
+-            "question_scores": record.get("question_scores", []),
++            "questions": [
++                _export_question_result(question)
++                for question in record.get("question_scores", [])
++            ],
+         })
+     if not grades:
+         raise ValueError("暂无可导出的成绩")
+-    return {"ok": True, "exported_at": datetime.now().isoformat(timespec="seconds"), "count": len(grades), "grades": grades}
++    return grades
+ 
+ def save_manual_review(payload):
+     with AI_REVIEW_LOCK:
+
+--- src/tests/test_candidate_export.py ---
+diff --git a/D:/Programs/OMRChecker/verification/export_result_format_fix_20260925/baseline/src__tests__test_candidate_export.py b/D:/Programs/OMRChecker/src/tests/test_candidate_export.py
+index da43f20..e9ac516 100644
+--- a/D:/Programs/OMRChecker/verification/export_result_format_fix_20260925/baseline/src__tests__test_candidate_export.py
++++ b/D:/Programs/OMRChecker/src/tests/test_candidate_export.py
+@@ -20,7 +20,7 @@ def export_records(monkeypatch):
+         {"review_id": "review-01", "student_name": "考生甲", "student_id": "000000000001",
+          "grade_confirmed": False, "grade_confirmation_status": "待确认", "grade_blockers": [],
+          "score_summary": {"total_score": 83, "possible_score": 100},
+-         "question_scores": [{"question": "1", "awarded_score": 2}]},
++         "question_scores": [{"question": "1", "question_id": 3001, "score": 4, "awarded_score": 2, "status": "部分正确", "score_basis": "AI审核"}]},
+         {"review_id": "review-02", "student_name": "考生乙", "grade_confirmed": True,
+          "grade_confirmation_status": "已确认", "grade_confirmed_at": "2026-09-25T12:00:00",
+          "score_summary": {"total_score": 42, "possible_score": 100}},
+@@ -75,9 +75,10 @@ def export_http(request, monkeypatch, export_records):
+ def test_export_http_matches_exact_selection(export_http, query, ids):
+     status, result, headers = export_http(query)
+     assert status == 200
+-    assert result["ok"] is True
+-    assert result["count"] == len(ids)
+-    assert {row["review_id"] for row in result["grades"]} == ids
++    assert isinstance(result, list)
++    assert len(result) == len(ids)
++    expected_student_ids = {"review-01": "000000000001", "review-02": "", "review-03": ""}
++    assert [row["student_id"] for row in result] == [expected_student_ids[review_id] for review_id in ("review-01", "review-02", "review-03") if review_id in ids]
+     assert headers["Cache-Control"] == "no-store"
+     assert headers["Content-Disposition"].startswith("attachment;")
+ 
+@@ -97,12 +98,9 @@ def test_stale_or_empty_selection_returns_actionable_json(export_http, query):
+ def test_export_preserves_confirmation_status_zero_score_and_question_details(export_records):
+     before = copy.deepcopy(export_records)
+     exported = scan_ui.export_confirmed_grades(["review-01", "review-03"])
+-    first, zero = exported["grades"]
+-    assert first["score"] == 83 and first["student_id"] == "000000000001"
+-    assert first["grade_confirmed"] is False and first["grade_confirmation_status"] == "待确认"
+-    assert first["question_scores"] == [{"question": "1", "awarded_score": 2}]
+-    assert zero["score"] == zero["percentage"] == 0
+-    assert zero["grade_blockers"] == ["第1题待复核"] and zero["confirmed_at"] == ""
++    first, zero = exported
++    assert first == {"student_name": "考生甲", "student_id": "000000000001", "session_id": "", "questions": [{"question_id": 3001, "score": 2, "remark": "部分正确；AI审核"}]}
++    assert zero == {"student_name": "考生丙", "student_id": "", "session_id": "", "questions": []}
+     assert export_records == before
+ 
+ 
+
+--- src/tests/test_candidates.py ---
+diff --git a/D:/Programs/OMRChecker/verification/export_result_format_fix_20260925/baseline/src__tests__test_candidates.py b/D:/Programs/OMRChecker/src/tests/test_candidates.py
+index 8c87536..498964f 100644
+--- a/D:/Programs/OMRChecker/verification/export_result_format_fix_20260925/baseline/src__tests__test_candidates.py
++++ b/D:/Programs/OMRChecker/src/tests/test_candidates.py
+@@ -189,8 +189,9 @@ def test_selected_scored_candidate_exports_before_grade_confirmation(tmp_path, m
+     review['score_summary'] = {'total_score': 83, 'possible_score': 100}
+     path.write_text(json.dumps(review, ensure_ascii=False), encoding='utf-8')
+     exported = scan_ui.export_confirmed_grades(['review-01'])
+-    assert exported['count'] == 1
+-    assert exported['grades'][0]['score'] == 83
++    assert len(exported) == 1
++    assert exported[0]['student_name'] == ''
++    assert exported[0]['questions'] == [{'question_id': 1, 'score': 0, 'remark': '待复核'}]
+ 
+ 
+ def test_confirm_grade_and_export_only_confirmed_records(tmp_path, monkeypatch):
+@@ -207,11 +208,10 @@ def test_confirm_grade_and_export_only_confirmed_records(tmp_path, monkeypatch):
+     assert confirmed['grade_confirmed'] is True
+     assert confirmed['grade_confirmation_status'] == '已确认'
+     exported = scan_ui.export_confirmed_grades()
+-    assert exported['count'] == 1
+-    assert exported['grades'][0]['score'] == 5
+-    assert exported['grades'][0]['confirmed_at']
+-    assert exported['grades'][0]['question_scores'][0]['awarded_score'] == 2
+-    assert exported['grades'][0]['question_scores'][1]['awarded_score'] == 3
++    assert len(exported) == 1
++    assert exported[0]['student_name'] == ''
++    assert exported[0]['questions'][0]['score'] == 2
++    assert exported[0]['questions'][1]['score'] == 3
+ 
+ 
+ def test_confirm_grade_rejects_pending_review(tmp_path, monkeypatch):
+@@ -255,10 +255,11 @@ def test_grade_confirmation_http_endpoints(tmp_path, monkeypatch):
+         with urlopen(base + '/api/candidates/export.json?review_id=review-01') as response:
+             exported = json.load(response)
+             assert response.headers['Content-Disposition'].startswith('attachment;')
+-        assert exported['count'] == 1 and exported['grades'][0]['score'] == 2
++        assert isinstance(exported, list) and len(exported) == 1
++        assert exported[0]['questions'][0]['score'] == 2
+         with urlopen(base + '/api/candidates/export.json?review_id=review-01&review_id=review-02') as response:
+             selected = json.load(response)
+-        assert selected['count'] == 2
++        assert isinstance(selected, list) and len(selected) == 2
+     finally:
+         server.shutdown()
+         server.server_close()
+
+--- ui/tests/candidates.test.cjs ---
+diff --git a/D:/Programs/OMRChecker/verification/export_result_format_fix_20260925/baseline/ui__tests__candidates.test.cjs b/D:/Programs/OMRChecker/ui/tests/candidates.test.cjs
+index 3ee9d83..c060081 100644
+--- a/D:/Programs/OMRChecker/verification/export_result_format_fix_20260925/baseline/ui__tests__candidates.test.cjs
++++ b/D:/Programs/OMRChecker/ui/tests/candidates.test.cjs
+@@ -47,7 +47,7 @@ function candidateFixture(initialRecords){
+       if(url.startsWith('/api/candidates/export.json?')){
+         if(exportReply)return exportReply();
+         const ids=new URLSearchParams(url.split('?')[1]).getAll('review_id');
+-        return {ok:true,blob:async()=>new Blob([JSON.stringify({ok:true,count:ids.length,grades:ids.map(review_id=>({review_id}))})])};
++        return {ok:true,blob:async()=>new Blob([JSON.stringify(ids.map((review_id,index)=>({student_name:index===0?'甲':'丙',student_id:review_id,session_id:20,questions:[]})))])};
+       }
+       assert.fail('Unexpected request: '+url);
+     }};
+@@ -96,7 +96,7 @@ test('download sends only selected review ids and exports the corresponding JSON
+   await f.$('candidateExportJson').listeners.click();
+   const url=f.calls.find(call=>call.url.startsWith('/api/candidates/export.json?')).url;
+   assert.deepEqual(new URLSearchParams(url.split('?')[1]).getAll('review_id'),['r1','r3']);
+-  const payload=JSON.parse(await f.blobs[0].text());assert.deepEqual(payload.grades.map(r=>r.review_id),['r1','r3']);
++  const payload=JSON.parse(await f.blobs[0].text());assert.equal(Array.isArray(payload),true);assert.equal(payload.length,2);assert.deepEqual(payload.map(r=>r.student_name),['甲','丙']);
+   assert.deepEqual(f.downloads,['选中考生成绩.json']);assert.equal(f.$('candidateMessage').textContent,'已导出 2 名考生成绩 JSON');
+ });
+ test('in-flight export remains disabled during refresh and suppresses duplicate requests',async()=>{

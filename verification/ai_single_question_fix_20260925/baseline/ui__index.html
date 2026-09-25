@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#1c2e50"><meta name="description" content="阅卷台：集中管理试卷、批量识别答题卡、复核成绩的在线阅卷工作空间。"><title>阅卷台 · 试卷自动批改平台</title><link rel="stylesheet" href="/static/app.css"><link rel="stylesheet" href="/static/platform.css?v=20260920"><link rel="stylesheet" href="/static/objective-view.css?v=20260920-sidebar"><link rel="stylesheet" href="/static/candidates.css?v=1"><link rel="stylesheet" href="/static/subjective-view.css?v=20260920"><link rel="stylesheet" href="/static/admin.css?v=settings-1"><link rel="stylesheet" href="/static/saas.css?v=1"><link rel="stylesheet" href="/static/review-deletion.css?v=1"></head><body class="platform-body">
+<a class="skip-link" href="#workspaceMain">跳到主要内容</a>
+<aside class="sidebar" id="platformSidebar"><a class="platform-brand" href="#dashboard"><span class="platform-logo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 6c-3-2-6-2-9-1v14c3-1 6-1 9 1 3-2 6-2 9-1V5c-3-1-6-1-9 1zm0 0v14"/></svg></span><span>阅卷台<small>试卷自动批改平台</small></span></a><div class="workspace-tag"><span class="workspace-avatar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span><div><strong>阅卷工作空间</strong><small id="workspaceRole">正在读取会话</small></div></div><p class="nav-caption">工作空间</p><nav aria-label="主导航"><a class="nav-link" href="#dashboard" data-nav="dashboard"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span>工作台</span></a><a class="nav-link" href="#papers" data-nav="papers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg><span>试卷管理</span></a><a class="nav-link" href="#candidates" data-nav="candidates"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m3 9v-2a6 6 0 0 0-2-4"/></svg><span>考生管理</span></a><a class="nav-link" href="#grading" data-nav="grading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V4h4m8 0h4v4M4 16v4h4m8 0h4v-4M3 12h18M8 8h8m-8 8h8"/></svg><span>批量批改</span></a><a class="nav-link" href="#results" data-nav="results"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v16h17M8 15v-4m5 4V7m5 8v-6"/></svg><span>成绩与复核</span><span class="nav-count" id="navPending">0</span></a></nav><p class="nav-caption tools-caption">辅助工具</p><nav aria-label="工具导航"><a class="nav-link" href="#sheets" data-nav="sheets"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h2m3 0h5m-10 4h2m3 0h5"/></svg><span>答题卡工具</span></a><a class="nav-link" href="#templates" data-nav="templates"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="12" rx="2"/><path d="M8 20h8M12 16v4M8 8h8M8 12h5"/></svg><span>识别模板</span></a><a class="nav-link" href="#scanner" data-nav="scanner"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V4h4m8 0h4v4M4 16v4h4m8 0h4v-4M3 12h18M8 8h8m-8 8h8"/></svg><span>基础扫描</span></a></nav><a class="nav-link" href="#admin" data-nav="admin" id="adminNav" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6z"/><path d="m8 12 3 3 5-6"/></svg><span>管理面板</span></a><div class="sidebar-bottom"><div class="sidebar-version">OMRChecker · 阅卷工作空间</div></div></aside><button class="sidebar-backdrop" id="sidebarBackdrop" aria-label="关闭导航" hidden></button>
+<div class="platform-main"><header class="platform-topbar"><div class="breadcrumb"><button class="icon-button mobile-menu" id="menuToggle" aria-label="展开导航" aria-controls="platformSidebar" aria-expanded="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button><span>教学工作台</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg><strong id="breadcrumbCurrent">工作台</strong></div><div class="topbar-right">
+<details class="saas-dropdown" id="serviceMenu"><summary class="health" id="healthBadge" aria-label="查看服务状态"><span aria-hidden="true"></span><b aria-live="polite">正在连接</b><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg></summary><div class="saas-dropdown-panel"><h3>平台服务状态</h3><div class="service-menu-row"><span>后端 API</span><span class="service-value" data-service="api">检查中</span></div><div class="service-menu-row"><span>数据服务</span><span class="service-value" data-service="postgres">检查中</span></div><div class="service-menu-row"><span>文件存储</span><span class="service-value" data-service="cos">检查中</span></div><div class="service-menu-row"><span>AI 阅卷</span><span class="service-value" data-service="ai">检查中</span></div><button class="refresh-service" type="button" data-refresh-service><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7A7 7 0 0 1 18 6l2 6M4 12l2 6a7 7 0 0 0 11.9-1"/></svg>重新检查</button></div></details>
+<details class="saas-dropdown" id="accountMenu"><summary class="account-trigger" aria-label="账户菜单"><span class="user-avatar" id="accountAvatar" aria-hidden="true">阅</span><span class="account-copy"><strong id="accountName">正在连接</strong><small id="accountRole">工作空间成员</small></span><svg class="chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg></summary><div class="saas-dropdown-panel"><div class="account-details"><strong id="accountEmail">读取账号信息中</strong><small id="accountMode">正在确认登录方式</small></div><a class="saas-menu-item" href="#papers"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6v18h12V7zM14 3v5h4M9 12h6M9 16h6"/></svg>我的试卷</a><a class="saas-menu-item" id="accountAdmin" href="#admin" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/></svg>管理面板</a><a class="saas-menu-item" id="accountLogin" href="/login.html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 17l5-5-5-5M15 12H3M16 3h5v18h-5"/></svg>前往登录</a><a class="saas-menu-item logout" id="accountLogout" href="/logout" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3H3v18h6M14 8l4 4-4 4M9 12h12"/></svg>退出登录</a></div></details>
+</div></header>
+<main class="workspace-main" id="workspaceMain" tabindex="-1"><div class="page-heading"><div><div class="page-eyebrow" id="pageEyebrow">教学工作台</div><h1 id="pageTitle" tabindex="-1">阅卷工作台</h1><p id="pageDescription">管理试卷、跟进批改、确认成绩，在一个工作空间内完成。</p></div><a class="button button-primary" href="#grading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>新建批改</a></div>
+<section class="platform-view" data-view="dashboard" aria-label="工作台">
+<div class="welcome-banner"><div><span class="banner-label"><span></span>专注教学 · 高效批改</span><span class="workspace-date" id="workspaceDate"></span><h2 id="welcomeTitle">让每一次批改更有条理</h2><p>从一份试卷到一份清晰的成绩。AI 辅助识别，关键结果由你确认。</p><a class="banner-button" href="#grading">开始批改<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></a><a class="banner-secondary" href="#papers">管理我的试卷</a></div><div class="banner-art" aria-hidden="true"><div class="art-grid"></div><div class="art-paper"><div class="art-paper-title"></div><div class="art-line"></div><div class="art-bubbles"><i></i><i></i><i></i><i></i></div><div class="art-bubbles"><i></i><i></i><i></i><i></i></div><div class="art-line short"></div><div class="art-ticks">✓</div></div><div class="art-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 12 3 3 5-6"/><rect x="4" y="3" width="16" height="18" rx="3"/></svg>AI 辅助 · 人工复核</div></div></div>
+<div class="overview-grid">
+<a class="overview-card" href="#papers"><span class="stat-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h5"/></svg></span><span class="stat-label">已导入试卷</span><strong id="statPapers">—</strong><small>试卷与参考答案</small></a>
+<a class="overview-card" href="#grading"><span class="stat-icon violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8V4h4m8 0h4v4M4 16v4h4m8 0h4v-4M3 12h18M8 8h8m-8 8h8"/></svg></span><span class="stat-label">本次完成批改</span><strong id="statCompleted">—</strong><small id="statCompletedHint">等待批改任务</small></a>
+<a class="overview-card" href="#results"><span class="stat-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span><span class="stat-label">当前试卷待复核</span><strong id="statPending">—</strong><small>客观题与文字题</small></a>
+<a class="overview-card" href="#results"><span class="stat-icon mint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4v16h17M8 15v-4m5 4V7m5 8v-6"/></svg></span><span class="stat-label">当前试卷得分</span><strong id="statScore">—</strong><small id="statScoreHint">批改后自动汇总</small></a>
+</div>
+<div class="dashboard-grid"><article class="panel dashboard-recent"><div class="section-heading"><div><h2>最近批改</h2><p>当前会话与最近一次批改记录</p></div><a class="text-link" href="#results">查看复核<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></a></div><div class="platform-table-wrap"><table class="platform-table"><thead><tr><th>试卷 / 学号</th><th>得分</th><th>状态</th><th>操作</th></tr></thead><tbody id="recentReviewRows"><tr><td colspan="4"><div class="table-empty">批改记录加载中…</div></td></tr></tbody></table></div></article>
+<article class="panel workflow-panel"><div class="section-heading"><div><h2>批改流程</h2><p>从试卷标准到最终成绩，四步完成</p></div></div><a class="workflow-step" href="#papers"><span>1</span><div><strong>导入试卷</strong><small>结构化题目与参考答案</small></div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></a><a class="workflow-step" href="#grading"><span>2</span><div><strong>上传答题卡</strong><small>照片或 PDF，支持多份并发</small></div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></a><a class="workflow-step" href="#grading"><span>3</span><div><strong>自动识别与初判</strong><small>填涂识别 · 文字提取 · AI 审核</small></div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></a><a class="workflow-step" href="#results"><span>4</span><div><strong>复核与导出</strong><small>核对扫描区域，确认最终成绩</small></div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></a></article></div>
+
+<div class="quick-grid"><a href="#papers" class="quick-card"><span class="quick-icon blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></span><div><strong>导入新试卷</strong><small>粘贴 JSON，快速建立批改标准</small></div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></a><a href="#sheets" class="quick-card"><span class="quick-icon violet"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h2m3 0h5m-10 4h2m3 0h5"/></svg></span><div><strong>制作答题卡</strong><small>自定义题型，生成打印 PDF</small></div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></a><a href="#results" class="quick-card"><span class="quick-icon amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 12 3 3 5-6"/><rect x="4" y="3" width="16" height="18" rx="3"/></svg></span><div><strong>继续人工复核</strong><small>查看识别图像与待确认题目</small></div><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></a></div></section>
+<section class="platform-view" data-view="papers" aria-label="试卷管理" hidden><article class="panel library-panel"><div class="section-heading"><div><h2>我的试卷 <span class="count-label" id="paperCount">0</span></h2><p>统一管理已导入的题目与答案</p></div><button class="button button-primary" id="openImport"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>导入试卷</button></div><div class="library-toolbar"><label class="search-box"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg><input id="paperSearch" type="search" aria-label="搜索试卷" placeholder="搜索试卷名称或编号"></label><span id="paperSearchCount" class="muted"></span></div><div class="platform-table-wrap"><table class="platform-table"><thead><tr><th>试卷</th><th>题目</th><th>总分</th><th>参考答案</th><th>操作</th></tr></thead><tbody id="paperRows"></tbody></table></div><div class="library-pagination"><button class="button button-secondary" id="papersPrevious" disabled>上一页</button><span id="papersPage" aria-live="polite">1 / 1</span><button class="button button-secondary" id="papersNext" disabled>下一页</button></div></article><div id="importEditor" hidden>    <section class="panel import-panel" id="examImportPanel">
+      <div class="panel-heading"><div><p class="panel-kicker">结构化数据导入</p><h2>导入试卷和答案信息</h2></div></div>
+      <p class="review-intro">粘贴结构化试卷与参考答案，校验后即可用于批改。</p>
+      <label class="field import-name-field" for="examImportName"><span>试卷名称</span><input id="examImportName" type="text" maxlength="120" placeholder="例如：七年级数学期中考试（留空自动命名）" autocomplete="off"></label>
+      <div class="import-grid">
+        <div class="import-column">
+          <label class="field" for="examImportText"><span>试卷 JSON</span></label>
+          <textarea id="examImportText" class="import-text" rows="12" placeholder="粘贴试卷 JSON 内容"></textarea>
+        </div>
+        <div class="import-column">
+          <label class="field" for="answerImportText"><span>答案 JSON（可选）</span></label>
+          <textarea id="answerImportText" class="import-text" rows="12" placeholder="粘贴答案 JSON、answer_map 或章节答案内容"></textarea>
+        </div>
+      </div>
+      <div class="builder-actions"><button class="button button-primary" id="importExamButton" type="button"><span>导入并校验</span><span>↥</span></button><span class="builder-status" id="importExamStatus">等待导入</span></div>
+      <div class="import-result hidden" id="importExamResult"><div class="review-summary" id="importExamSummary"></div><div class="import-section-list" id="importSectionList"></div><div class="builder-actions"><button class="button button-primary" id="importUseForReview" type="button">使用本试卷识别答题卡</button><a class="button button-secondary" id="importExamDownload" href="#" download>下载标准化 JSON</a></div></div>
+    </section></div></section>
+<section class="platform-view" data-view="candidates" aria-label="考生管理" hidden>
+<div class="candidate-stats"><div><span>答卷记录</span><strong id="candidateTotal">0</strong></div><div><span>已识别姓名</span><strong id="candidateRecognized">0</strong></div><div><span>姓名已确认</span><strong id="candidateConfirmed">0</strong></div></div>
+<div class="candidate-layout"><article class="panel candidate-library"><div class="section-heading"><div><h2>考生与答卷</h2><p>每份答题卡独立关联考生信息与成绩</p></div><button class="button button-secondary" id="candidateRefresh" type="button">刷新</button></div>
+<div class="candidate-toolbar"><label class="search-box"><input type="search" id="candidateSearch" aria-label="搜索考生" placeholder="搜索姓名 / 12 位学号"></label><label class="visually-hidden" for="candidateFilter">姓名状态筛选</label><select id="candidateFilter"><option value="all">全部考生</option><option value="pending">姓名待确认</option><option value="confirmed">姓名已确认</option></select><button class="button button-secondary" id="candidateRecognizeAll" type="button">识别缺失姓名</button><span class="candidate-selection-summary" id="candidateSelectionSummary" aria-live="polite">已选择 0 人</span><button class="button button-secondary" id="candidateExportJson" type="button" disabled>导出选中成绩 JSON</button></div>
+<div class="candidate-progress" id="candidateJob" hidden><div><strong id="candidateJobText" role="status" aria-live="polite"></strong><span id="candidateJobCount"></span></div><progress id="candidateJobProgress" aria-label="姓名识别进度" max="1" value="0"></progress></div>
+<p id="candidateMessage" class="candidate-message" role="status" aria-live="polite"></p>
+<div class="platform-table-wrap"><table class="platform-table candidate-table"><thead><tr><th class="candidate-select-header"><input id="candidateSelectAll" type="checkbox" aria-label="选择全部有成绩考生"></th><th>考生</th><th>卷型 / 成绩</th><th>姓名状态</th><th>操作</th></tr></thead><tbody id="candidateRows"></tbody></table></div><div class="library-pagination"><button class="button button-secondary" id="candidatePrevious" type="button">上一页</button><span id="candidatePage" aria-live="polite">1 / 1</span><button class="button button-secondary" id="candidateNext" type="button">下一页</button></div></article>
+<aside class="panel candidate-detail" aria-label="考生信息编辑"><div class="candidate-detail-heading"><span class="candidate-avatar" aria-hidden="true">人</span><div><h2 id="candidateDetailHeading">考生信息</h2><p id="candidateDetailSub">从列表选择一份答卷</p></div></div><div id="candidateDetailEmpty" class="table-empty">选择考生后，对照姓名原图确认信息。</div>
+<form id="candidateForm" hidden><div class="candidate-name-preview"><span>姓名原始扫描</span><img id="candidateNameImage" alt="答题卡姓名手写区域" hidden><p id="candidateNameHint">点击识别姓名后显示原图</p></div><p class="candidate-ocr" id="candidateOcrText"></p><div class="candidate-fields"><label class="field"><span>姓名</span><input id="candidateName" type="text" maxlength="40" autocomplete="off" placeholder="确认或填写考生姓名"></label><label class="field"><span>学号</span><input id="candidateStudentId" type="text" inputmode="numeric" maxlength="12" pattern="[0-9]{12}" autocomplete="off" placeholder="12 位学号"></label><label class="field"><span>试卷类型</span><select id="candidatePaperType"><option value="">待确认</option><option value="A">A 卷</option><option value="B">B 卷</option><option value="C">C 卷</option></select></label></div><div class="candidate-detail-actions"><button class="button button-primary" id="candidateSave" type="submit">保存考生信息</button><button class="button button-secondary" id="candidateRecognize" type="button">识别姓名</button><button class="button button-secondary review-delete-action" id="candidateDelete" type="button">删除答卷及考生信息</button><button class="text-link" id="candidateOpenReview" type="button">查看答卷与成绩 →</button></div><p id="candidateSaveStatus" role="status" aria-live="polite"></p></form></aside></div></section>
+<section class="platform-view" data-view="grading" aria-label="批量批改" hidden><div class="process-strip"><span class="active"><b>1</b>选择试卷</span><i></i><span><b>2</b>上传答题卡</span><i></i><span><b>3</b>自动批改</span><i></i><span><b>4</b>成绩复核</span></div>    <section class="panel exam-review-panel" id="examReviewPanel">
+      <div class="panel-heading"><div><p class="panel-kicker">上传与识别</p><h2>新建批改任务</h2></div></div>
+      <p class="review-intro">每个 PDF 作为一份试卷；照片按选择顺序每两张组成一份。</p>
+      <div class="review-inputs">
+        <label class="field"><span>已导入的试卷与答案</span><select id="reviewImportSelect"><option value="">请选择已导入试卷</option></select></label>
+        <label class="field"><span>识别模板</span><select id="reviewTemplateSelect"><option value="">正在加载模板</option></select></label>
+        <label class="field"><span>答题卡文件（可选择多份）</span><input id="reviewCardFiles" type="file" accept=".jpg,.jpeg,.png,.pdf" multiple></label>
+        <label class="field recognition-mode-field"><span>文字识别方式</span><select id="reviewRecognitionMode" data-recognition-mode><option value="local_ocr_ai">本地 OCR + AI 审核</option><option value="ai_only">仅 AI 识别（关闭本地 OCR）</option></select><small>仅 AI 模式使用已配置的 AI 接口；填涂检测与图像定位保持启用。</small></label>
+        <label class="field"><span>同时批改数量</span><select id="reviewConcurrency"><option value="1">1 份</option><option value="2" selected>2 份</option><option value="3">3 份</option><option value="4">4 份</option></select></label>
+      </div>
+      <div id="reviewFileSummary" class="upload-summary" aria-live="polite">选择文件后将在这里显示份数与大小。</div>
+      <div class="builder-actions"><button class="button button-primary" id="reviewScanButton" type="button" disabled><span>开始批改</span><span>→</span></button><span class="builder-status" id="reviewStatus">请先导入结构化试卷与答案</span></div>
+      <div class="batch-review-panel hidden" id="reviewBatchPanel" aria-live="polite"><div class="batch-review-head"><strong id="reviewBatchSummary">批量任务准备中</strong><span id="reviewBatchProgress">0 / 0</span></div><div class="batch-review-list" id="reviewBatchList"></div></div>
+    </section><div class="grading-note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m13 2-9 12h7l-1 8 10-13h-7z"/></svg><div><strong>识别与审核分队列运行</strong><span>上传后可切换页面，任务进度会持续更新。</span></div><a href="#results" class="text-link">查看成绩与复核 →</a></div></section>
+<section class="platform-view" data-view="results" aria-label="成绩与复核" hidden><article class="panel review-workspace"><div class="section-heading"><div><p class="panel-kicker">自动判断与人工复核</p><h2>批改结果</h2><p id="activeReviewLabel">选择批改记录，核对答案与最终得分。</p></div><button class="button button-secondary" id="exportGradeCsv" disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4"/></svg>导出当前成绩</button></div><div id="reviewEmpty" class="workspace-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m8 12 3 3 5-6"/><rect x="4" y="3" width="16" height="18" rx="3"/></svg><h3>等待第一份批改结果</h3><p>上传答题卡后，可在这里逐题复核并汇总成绩。</p><a href="#grading" class="button button-primary">新建批改</a></div>      <p class="review-deletion-status" id="reviewDeletionStatus" role="status" aria-live="polite"></p><div class="review-results hidden" id="reviewResults">
+        <div class="score-board" id="reviewScoreBoard" aria-live="polite">
+          <div class="score-total"><span>当前总分</span><strong id="reviewTotalScore">0 / 0</strong></div>
+          <div><span>客观题</span><strong id="reviewObjectiveScore">0 / 0</strong></div>
+          <div><span>文字题</span><strong id="reviewTextScore">0 / 0</strong></div>
+          <div><span>待复核分值</span><strong id="reviewPendingScore">0 分</strong></div>
+        </div>
+        <div class="review-summary" id="reviewSummary"></div>
+        <div class="paper-type-result" id="reviewPaperType" aria-live="polite">试卷类型：待识别</div>
+        <div class="review-filter-bar"><div class="segmented" role="group" aria-label="题目筛选"><button type="button" class="active" data-filter="all" aria-pressed="true">全部题目</button><button type="button" data-filter="pending" aria-pressed="false">待复核</button><button type="button" data-filter="objective" aria-pressed="false">客观题</button><button type="button" data-filter="text" aria-pressed="false">主观题</button></div><span id="reviewFilterCount"></span></div><p class="empty-filter hidden" id="reviewFilterEmpty">当前筛选下的题目已完成确认。</p><div class="review-section-title" data-question-section="objective">客观题复核</div><div class="objective-summary" id="reviewObjectiveSummary" aria-live="polite"></div><div class="objective-list" id="reviewObjective"></div>
+        <div class="review-section-title" data-question-section="text">主观题复核</div><div class="review-items" id="reviewItems"></div>
+        <div class="builder-actions review-actions"><span id="reviewSaveStatus" role="status"></span><button class="button button-secondary review-delete-action" id="reviewDeleteButton" type="button">删除批改记录及考生信息</button><button class="button button-primary" id="reviewAiButton" type="button"><span>AI判断手写内容</span><span>✦</span></button><button class="button button-primary" id="reviewSaveButton" type="button"><span>保存复核结果</span><span>✓</span></button><button class="button button-primary" id="reviewConfirmGradeButton" type="button" disabled><span>确认成绩</span><span>✓</span></button><a class="button button-secondary" id="reviewReportLink" href="#" download>下载复核记录</a></div>
+        <div class="ai-progress hidden" id="reviewAiProgress" role="status" aria-live="polite">
+          <div class="ai-progress-header"><strong id="reviewAiProgressText">正在准备大题分组</strong><span id="reviewAiElapsed">已运行 0 秒</span></div>
+          <div class="ai-progress-track" id="reviewAiTrack" role="progressbar" aria-label="AI审核进度" aria-valuemin="0" aria-valuemax="1" aria-valuenow="0"><span id="reviewAiFill"></span></div>
+        </div>
+      </div>
+</article></section>
+<section class="platform-view" data-view="sheets" aria-label="答题卡工具" hidden>    <section class="panel builder-panel" id="sheetBuilder">
+      <div class="builder-copy">
+        <p class="panel-kicker">答题卡工具</p>
+        <h2>创建可打印答题卡</h2>
+        <p>自定义题型与身份栏，生成可打印 PDF 和配套扫描配置。</p>
+        <div class="builder-form">
+          <label class="field field-wide">
+            <span>卷子标题</span>
+            <input id="sheetTitle" type="text" maxlength="48" value="OMR答题卡">
+          </label>
+          <label class="field field-wide">
+            <span>说明文字</span>
+            <input id="sheetSubtitle" type="text" maxlength="120" value="请完整填涂答案，并在横线上清晰书写">
+          </label>
+          <label class="field">
+            <span>学号位数</span>
+            <select id="sheetIdDigits"><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option><option>9</option><option>10</option><option>11</option><option selected>12</option></select>
+          </label>
+          <label class="field">
+            <span>选择题数量</span>
+            <select id="sheetMcqCount"><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option selected>5</option></select>
+          </label>
+          <label class="field">
+            <span>每题选项</span>
+            <select id="sheetMcqChoices"><option>2</option><option>3</option><option selected>4</option><option>5</option></select>
+          </label>
+          <label class="field">
+            <span>判断题数量</span>
+            <select id="sheetTfCount"><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option selected>5</option></select>
+          </label>
+          <label class="field">
+            <span>填空行数量</span>
+            <select id="sheetTextCount"><option>0</option><option>1</option><option>2</option><option>3</option><option>4</option><option selected>5</option></select>
+          </label>
+          <div class="field switch-field">
+            <span>身份栏</span>
+            <label><input id="sheetIncludeName" type="checkbox" checked><i></i>姓名</label>
+            <label><input id="sheetIncludeWrittenId" type="checkbox" checked><i></i>手写学号</label>
+          </div>
+        </div>
+        <div class="builder-actions">
+          <button class="button button-primary" id="createSheetButton"><span>生成 PDF</span><span>↗</span></button>
+          <span class="builder-status" id="sheetStatus">生成后可直接预览和下载</span>
+        </div>
+        <div class="sheet-downloads hidden" id="sheetDownloads">
+          <a class="button button-download" id="sheetPdfLink" href="#" download>下载 PDF</a>
+          <a class="button button-secondary" id="sheetPackageLink" href="#" download>下载扫描配置包</a>
+        </div>
+      </div>
+      <div class="builder-preview">
+        <div class="builder-preview-head"><span>打印预览</span><strong id="sheetPreviewTitle">OMR答题卡</strong></div>
+        <div class="paper-mock" id="paperMock">
+          <div class="mock-title">OMR答题卡</div>
+          <div class="mock-subtitle">请完整填涂答案，并在横线上清晰书写</div>
+          <div class="mock-box mock-identity"><b>学号</b><span>○ ○ ○ ○ ○ ○ ○ ○</span><i></i><i></i></div>
+          <div class="mock-paper-type"><b>试卷类型</b><span>○ A　　○ B　　○ C</span></div>
+          <div class="mock-columns"><div><b>选择题</b><span>○A ○B ○C ○D</span><span>○A ○B ○C ○D</span><span>○A ○B ○C ○D</span></div><div><b>判断题</b><span>○T　○F</span><span>○T　○F</span><span>○T　○F</span></div></div>
+          <div class="mock-lines"><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+        <iframe class="pdf-preview hidden" id="sheetPdfPreview" title="生成的卷子 PDF 预览"></iframe>
+      </div>
+    </section></section>
+<section class="platform-view" data-view="templates" aria-label="识别模板" hidden>
+  <section class="panel template-manager-panel">
+    <div class="section-heading"><div><p class="panel-kicker">扫描配置</p><h2>识别模板</h2><p>保存多套答题卡定位与切割配置，并设置任务默认模板。</p></div><span class="template-count" id="templateCount">0 套</span></div>
+    <div class="template-manager-grid">
+      <div class="template-list" id="templateList" aria-live="polite"></div>
+      <form class="template-editor" id="templateEditor">
+        <div><p class="panel-kicker">模板信息</p><h3 id="templateEditorTitle">新建模板</h3></div>
+        <input id="templateEditingId" type="hidden">
+        <label class="field"><span>模板名称</span><input id="templateName" type="text" maxlength="100" required placeholder="例如：第十六届软件方向通用答题卡"></label>
+        <label class="field"><span>模板说明</span><textarea id="templateDescription" maxlength="500" rows="4" placeholder="填写页数、题号范围与适用场景"></textarea></label>
+        <label class="field" id="templateSourceField"><span>从现有模板复制</span><select id="templateSource"></select></label>
+        <div class="template-detail" id="templateDetail">选择左侧模板可编辑名称和说明。</div>
+        <div class="builder-actions template-actions"><button class="button button-primary" id="templateSave" type="submit">创建模板</button><button class="button button-secondary" id="templateReset" type="button">新建副本</button><button class="button button-secondary template-delete" id="templateDelete" type="button" hidden>删除模板</button></div>
+        <p class="builder-status" id="templateStatus" role="status" aria-live="polite"></p>
+      </form>
+    </div>
+  </section>
+</section>
+<section class="platform-view" data-view="scanner" aria-label="基础扫描" hidden>    <section class="work-grid">
+      <article class="panel upload-panel">
+        <div class="panel-heading">
+          <div><p class="panel-kicker">扫描输入</p><h2>添加试卷</h2></div>
+        </div>
+        <label class="field scan-template-field"><span>识别模板</span><select id="scanTemplateSelect"><option value="">正在加载模板</option></select></label>
+        <label class="field recognition-mode-field"><span>文字识别方式</span><select id="scanRecognitionMode" data-recognition-mode><option value="local_ocr_ai">本地 OCR</option><option value="ai_only">仅 AI 识别（关闭本地 OCR）</option></select><small>仅 AI 模式使用已配置的 AI 接口；填涂检测与图像定位保持启用。</small></label>
+        <label class="drop-zone" id="dropZone" for="fileInput">
+          <input id="fileInput" type="file" accept=".jpg,.jpeg,.png,.pdf" multiple>
+          <span class="upload-icon">
+            <svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 13.5v5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-5"/></svg>
+          </span>
+          <strong>拖入照片或点击选择</strong>
+          <span>支持 JPG、PNG、PDF，单个文件 24 MB 以内</span>
+        </label>
+        <div class="file-list empty" id="fileList"><div class="empty-files">已选文件会显示在这里</div></div>
+        <div class="button-row">
+          <button class="button button-primary" id="scanButton" disabled><span>开始识别</span><span>→</span></button>
+          <button class="button button-secondary" id="demoButton">运行内置示例</button>
+        </div>
+      </article>
+
+      <article class="panel status-panel">
+        <div class="panel-heading">
+          <div><p class="panel-kicker">任务状态</p><h2 id="statusTitle">等待文件</h2></div>
+        </div>
+        <div class="scan-visual">
+          <div class="sheet-visual">
+            <div class="sheet-line line-one"></div><div class="sheet-line line-two"></div>
+            <div class="bubble-row"><i></i><i></i><i></i><i></i></div>
+            <div class="bubble-row"><i></i><i></i><i></i><i></i></div>
+            <div class="sheet-line line-three"></div><div class="scan-beam"></div>
+          </div>
+        </div>
+        <div class="progress-track"><span id="progressBar"></span></div>
+        <p class="status-copy" id="statusCopy">选择照片后即可启动扫描。</p>
+        <div class="metrics">
+          <div><span>文件</span><strong id="metricFiles">0</strong></div>
+          <div><span>结果</span><strong id="metricRows">0</strong></div>
+          <div><span>耗时</span><strong id="metricTime">—</strong></div>
+        </div>
+      </article>
+    </section>    <section class="panel results-panel hidden" id="resultsPanel">
+      <div class="results-heading">
+        <div><p class="panel-kicker">识别结果</p><h2>扫描完成</h2></div>
+        <a class="button button-download" id="downloadButton" href="#" download>下载 CSV ↓</a>
+      </div>
+      <div class="result-layout">
+        <div class="table-wrap"><table id="resultTable"><thead></thead><tbody></tbody></table></div>
+        <aside class="preview-pane">
+          <div class="preview-label"><span>当前试卷数据</span><strong id="previewName">—</strong></div>
+          <div class="detail-grid" id="detailGrid"></div>
+          <div class="preview-caption">校验预览</div>
+          <div class="preview-frame" id="previewFrame"><p>点击结果行查看识别图</p></div>
+        </aside>
+      </div>
+    </section></section>
+<section class="admin-console" data-view="admin" hidden aria-label="管理员管理面板">
+  <div class="admin-notice"><p id="adminMode">管理员专属工作空间</p><small id="adminConfig"></small></div>
+  <section class="saas-status-panel" id="adminSystemStatus" hidden aria-labelledby="servicePanelTitle"><div class="saas-status-heading"><div><h2 id="servicePanelTitle">系统状态</h2><div class="local-label"><span aria-hidden="true"></span><span id="storageStatus">读取存储配置中</span></div><p id="serviceUpdated" aria-live="polite">读取当前部署配置</p></div><button class="refresh-service" type="button" data-refresh-service><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7A7 7 0 0 1 18 6l2 6M4 12l2 6a7 7 0 0 0 11.9-1"/></svg>刷新状态</button></div><div class="service-grid"><div class="service-card"><span>账号访问</span><span class="service-value" data-service="auth">读取中</span></div><div class="service-card"><span>数据存储</span><span class="service-value" data-service="postgres">读取中</span></div><div class="service-card"><span>文件存储</span><span class="service-value" data-service="cos">读取中</span></div><div class="service-card"><span>AI 阅卷</span><span class="service-value" data-service="ai">读取中</span></div></div></section>
+  <div class="admin-toolbar"><p class="admin-status" id="adminStatus" role="status" aria-live="polite"></p><button type="button" class="button button-secondary" id="adminRefresh">刷新管理数据</button></div>
+  <div class="admin-metrics" id="adminMetrics"></div>
+  <section class="admin-panel admin-settings" aria-labelledby="adminSettingsTitle">
+    <div class="admin-toolbar"><div><h2 id="adminSettingsTitle">服务参数配置</h2><p>保存值优先于环境变量。即时项用于后续任务，重启项在服务重启后应用。</p></div><span class="admin-settings-revision" id="adminSettingsRevision"></span></div>
+    <p class="admin-status" id="adminSettingsStatus" role="status" aria-live="polite"></p>
+    <p class="admin-settings-pending" id="adminSettingsPending" hidden></p>
+    <form id="adminSettingsForm"><div class="admin-settings-fields" id="adminSettingsFields"></div>
+      <div class="admin-settings-actions"><span id="adminSettingsDraft">正在加载配置</span><div><button class="button button-secondary" type="button" id="adminSettingsReload">重新加载</button><button class="button button-primary" type="submit" id="adminSettingsSave" disabled>保存配置</button></div></div>
+    </form>
+    <details class="admin-settings-history"><summary>查看配置修改记录</summary><ul class="admin-settings-audit" id="adminSettingsAudit"></ul></details>
+  </section>
+  <div class="admin-management" id="adminManagement" hidden>
+    <section class="admin-panel" aria-labelledby="adminUsersTitle">
+      <div class="admin-toolbar"><div><h2 id="adminUsersTitle">用户管理</h2><p id="adminCreateHint"></p></div><button class="button button-primary" type="button" id="adminCreateUser">创建账号</button></div>
+      <form class="admin-filters" id="adminSearchForm"><label class="admin-search">搜索账号<input id="adminSearch" type="search" placeholder="搜索邮箱或显示名称" maxlength="100"></label><label>角色<select id="adminRoleFilter"><option value="">全部角色</option><option value="admin">管理员</option><option value="teacher">教师</option></select></label><label>账号状态<select id="adminActiveFilter"><option value="">全部状态</option><option value="true">已启用</option><option value="false">已停用</option></select></label><button type="submit" class="button button-secondary">搜索</button></form>
+      <div class="admin-table-wrap" tabindex="0" aria-label="账号列表，可横向滚动"><table class="admin-table"><thead><tr><th scope="col">账号</th><th scope="col">角色</th><th scope="col">登录方式</th><th scope="col">状态</th><th scope="col">创建时间</th><th scope="col">操作</th></tr></thead><tbody id="adminUsersBody"></tbody></table></div>
+      <div class="admin-pager"><span id="adminUsersPage"></span><div><button type="button" class="button button-secondary" id="adminUsersPrev">上一页</button><button type="button" class="button button-secondary" id="adminUsersNext">下一页</button></div></div>
+    </section>
+    <section class="admin-panel" aria-labelledby="adminAuditTitle"><h2 id="adminAuditTitle">操作审计</h2><p>追踪管理员的账号变更，记录操作人、时间与变更字段。</p>
+      <div class="admin-table-wrap" tabindex="0" aria-label="操作审计，可横向滚动"><table class="admin-table"><thead><tr><th scope="col">操作时间</th><th scope="col">操作人</th><th scope="col">操作</th><th scope="col">目标账号</th><th scope="col">变更字段</th></tr></thead><tbody id="adminAuditBody"></tbody></table></div>
+      <div class="admin-pager"><span id="adminAuditPage"></span><div><button type="button" class="button button-secondary" id="adminAuditPrev">上一页</button><button type="button" class="button button-secondary" id="adminAuditNext">下一页</button></div></div>
+    </section>
+  </div>
+  <dialog class="admin-dialog" id="adminUserDialog" aria-labelledby="adminDialogTitle"><h2 id="adminDialogTitle">创建账号</h2><form id="adminUserForm">
+    <label>邮箱<input id="adminUserEmail" name="email" type="email" maxlength="254" required autocomplete="off"></label>
+    <label>显示名称<input id="adminUserName" name="display_name" maxlength="80" autocomplete="off"></label>
+    <label>角色<select id="adminUserRole" name="role"><option value="teacher">教师</option><option value="admin">管理员</option></select></label>
+    <label id="adminActiveLabel">账号状态<select id="adminUserActive" name="is_active"><option value="true">已启用</option><option value="false">已停用</option></select></label>
+    <label id="adminPasswordLabel">密码<input id="adminUserPassword" name="password" type="password" minlength="12" maxlength="128" autocomplete="new-password" aria-describedby="adminPasswordHint"><small id="adminPasswordHint"></small></label>
+    <p class="admin-self-hint" id="adminSelfHint" hidden>当前账号保留管理员角色与启用状态。修改自己的密码后，请重新登录。</p>
+    <p class="admin-error" id="adminFormError" role="alert"></p><div class="admin-dialog-actions"><button type="button" class="button button-secondary" id="adminCancelUser">取消</button><button type="submit" class="button button-primary" id="adminSaveUser">保存账号</button></div>
+  </form></dialog>
+</section>
+
+<footer class="workspace-footer"><span>阅卷台 · 试卷自动批改平台</span><span id="platformServiceStatus">正在检查服务状态</span></footer>
+</main></div><div class="error-toast" id="errorToast" role="alert"></div><div class="platform-toast" id="platformToast" role="status"></div><script src="/static/platform.js?v=delete-1" defer></script><script src="/static/api.js?v=20260923" defer></script><script src="/static/auth.js?v=admin-1" defer></script><script src="/static/admin.js?v=1" defer></script><script src="/static/admin-settings.js?v=1" defer></script><script src="/static/saas.js?v=storage-admin-1" defer></script><script src="/static/objective-view.js?v=20260920-sidebar" defer></script><script src="/static/candidates.js?v=export-selection-20260925" defer></script><script src="/static/subjective-view.js?v=20260920" defer></script><script src="/static/templates.js?v=20260921" defer></script><script src="/static/review-deletion.js?v=1" defer></script><script src="/static/app.js?v=review-async-20260925" defer></script></body></html>

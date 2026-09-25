@@ -1,0 +1,20 @@
+changed_branch=export-result-format
+changed_fields=scan_ui.export_confirmed_grades; _export_question_result; candidate export HTTP payload
+
+OUTPUT_SCHEMA
+[
+  {"student_name":"xxx","student_id":"2026xxxxxxxx","session_id":20,"questions":[
+    {"question_id":3001,"score":4,"remark":"status；score_basis"}
+  ]}
+]
+
+REMARK_RULE=remark is status plus score_basis joined by the Chinese semicolon；
+SCORE_RULE=score uses awarded_score and falls back to score when awarded_score is absent.
+QUESTION_ID_RULE=digit-only string question IDs become integers.
+
+ARTIFACTS
+MODIFIED_FILE=D:\Programs\OMRChecker\verification\export_result_format_fix_20260925\MODIFIED_FILE
+DIFF_FILE=D:\Programs\OMRChecker\verification\export_result_format_fix_20260925\DIFF_FILE
+VERIFICATION.txt=D:\Programs\OMRChecker\verification\export_result_format_fix_20260925\VERIFICATION.txt
+ROLLBACK.sh=D:\Programs\OMRChecker\verification\export_result_format_fix_20260925\ROLLBACK.sh
+BASELINE_SHA256=D:\Programs\OMRChecker\verification\export_result_format_fix_20260925\BASELINE_SHA256.txt

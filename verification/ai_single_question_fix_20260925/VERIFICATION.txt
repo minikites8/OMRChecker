@@ -1,0 +1,57 @@
+changed_branch=single-question-ai
+changed_fields=exam_review.apply_ai_review_question; scan_ui.start_ai_question_review; POST /api/review/ai-judge-question; ui requestAiQuestion and per-item single-ai-button
+
+ARTIFACTS
+MODIFIED_FILE=D:\Programs\OMRChecker\verification\ai_single_question_fix_20260925\MODIFIED_FILE
+DIFF_FILE=D:\Programs\OMRChecker\verification\ai_single_question_fix_20260925\DIFF_FILE
+VERIFICATION.txt=D:\Programs\OMRChecker\verification\ai_single_question_fix_20260925\VERIFICATION.txt
+ROLLBACK.sh=D:\Programs\OMRChecker\verification\ai_single_question_fix_20260925\ROLLBACK.sh
+BASELINE_SHA256=D:\Programs\OMRChecker\verification\ai_single_question_fix_20260925\BASELINE_SHA256.txt
+
+IMPLEMENTATION
+- exam_review.py adds apply_ai_review_question and shared per-item AI result application.
+- scan_ui.py adds AI_QUESTION_WORKERS, start_ai_question_review, single-question persistence, score recomputation, grade reset, and local route dispatch.
+- backend/app.py adds POST /api/review/ai-judge-question.
+- ui/app.js renders one button per text question, sends {review_id, question}, polls the existing review status endpoint, and suppresses duplicate clicks per question.
+- ui/app.css styles the per-question button; ui/index.html updates the app.js cache version.
+- Other question AI fields remain unchanged. The selected question updates ai_status, ai_confidence, ai_visual_text, ai_reason, ai_corrected_answer, ai_review_policy, ai_visual_evidence, expected_answer, final_status, score_basis, and awarded_score. Full review_summary and score_summary recalculate. grade_confirmed resets to false after re-recognition.
+
+BASELINE
+Command: & 'D:\Programs\OMRChecker\.venv\Scripts\python.exe' -m pytest
+Input: pre-change workspace snapshot captured in baseline/.
+Literal result: 3 collection errors; ModuleNotFoundError: No module named 'freezegun'.
+Exit status: 1.
+Command: $tests=(Get-ChildItem -LiteralPath 'ui/tests' -Filter '*.test.cjs' | ForEach-Object { $_.FullName }); node --test @tests
+Input: pre-change UI source and test set.
+Literal output/result: tests 83; pass 83; fail 0; cancelled 0; skipped 0; exit status 0.
+
+MODIFIED
+Command: & 'D:\Programs\OMRChecker\.venv\Scripts\python.exe' -m pytest src/tests/test_ai_single_question.py src/tests/test_ai_judge.py src/tests/test_ai_only.py src/tests/test_review_async.py src/tests/test_review_endpoint.py -q -rA
+Input: review with questions 31 and 32, mocked AI response for selected question 31, local HTTP request question 32, FastAPI request question 64(1).
+Literal output/result: 4 new single-question tests plus the existing selected review tests passed; EXIT_STATUS=0. Warnings: fitz deprecation, FastAPI on_event deprecation, Starlette httpx deprecation.
+Exit status: 0.
+Command: $tests=(Get-ChildItem -LiteralPath 'ui/tests' -Filter '*.test.cjs' | ForEach-Object { $_.FullName }); node --test @tests
+Input: full modified UI source and test set.
+Literal output/result: tests 85; pass 85; fail 0; cancelled 0; skipped 0; exit status 0.
+Command: & 'D:\Programs\OMRChecker\.venv\Scripts\python.exe' -m py_compile exam_review.py scan_ui.py backend/app.py
+Input: modified Python modules.
+Literal output/result: no output; compilation completed.
+Exit status: 0.
+Command: node --check ui/app.js
+Input: modified ui/app.js.
+Literal output/result: no output; syntax check completed.
+Exit status: 0.
+
+ROLLBACK
+Command: /d/Programs/OMRChecker/verification/ai_single_question_fix_20260925/ROLLBACK.sh /d/Programs/OMRChecker/verification/ai_single_question_fix_20260925/rollback_test/workspace
+Input: separate copy of the modified source files.
+Literal output/result: ROLLBACK_OK target=/d/Programs/OMRChecker/verification/ai_single_question_fix_20260925/rollback_test/workspace; six source hashes matched baseline; new test files removed; ROLLBACK_VERIFIED.
+Exit status: 0.
+Command: main workspace hash comparison after rollback test.
+Input: D:\Programs\OMRChecker.
+Literal output/result: exam_review.py, scan_ui.py, backend\app.py, ui\app.js, ui\app.css, ui\index.html all reported MainStillModified=True; MAIN_MODIFIED_PRESERVED.
+Exit status: 0.
+ROLLBACK.sh mode: -rwxr-xr-x.
+
+RESTORED_BEHAVIOR
+A rollback copy matches the baseline hashes. The main workspace retains the single-question AI branch and fields.

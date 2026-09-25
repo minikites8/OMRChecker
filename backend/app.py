@@ -291,11 +291,15 @@ def candidates(request: Request) -> dict:
 
 
 @app.get("/api/candidates/export.json")
-def candidate_export(request: Request, review_id: Optional[List[str]] = None, review_ids: Optional[List[str]] = None) -> JSONResponse:
+def candidate_export(request: Request) -> JSONResponse:
     current_user(request)
-    selected = (review_id or []) + (review_ids or [])
-    selected = [item for value in selected for item in str(value).split(",") if item.strip()]
-    return JSONResponse(legacy.export_confirmed_grades(selected or None))
+    values = request.query_params.getlist("review_id") + request.query_params.getlist("review_ids")
+    selected = [item.strip() for value in values for item in value.split(",") if item.strip()] if values else None
+    response = _review_response(request, lambda: legacy.export_confirmed_grades(selected))
+    response.headers["Cache-Control"] = "no-store"
+    if response.status_code == 200:
+        response.headers["Content-Disposition"] = 'attachment; filename="candidate-grades.json"'
+    return response
 
 
 @app.get("/api/exam/imports")
@@ -391,6 +395,12 @@ def review_batch(request: Request, payload: dict) -> JSONResponse:
 def review_ai(request: Request, payload: dict) -> JSONResponse:
     current_user(request)
     return _review_response(request, lambda: legacy.start_ai_review(payload))
+
+
+@app.post("/api/review/ai-judge-question")
+def review_ai_question(request: Request, payload: dict) -> JSONResponse:
+    current_user(request)
+    return _review_response(request, lambda: legacy.start_ai_question_review(payload))
 
 
 @app.post("/api/review/delete")

@@ -1,0 +1,214 @@
+EXPORT_SELECTION_FIX_VERIFICATION
+DATE=2026-09-25
+
+CHANGED_BRANCH_OR_FIELD
+ui/candidates.js: candidate checkbox, select-all, selection retention and export-button state use hasExportableScore(record).
+scan_ui.py: selected export IDs accept scored candidate records and validate stale, empty and incomplete selections.
+backend/app.py: separated API export route parses repeated and comma-separated review IDs and returns JSON download headers.
+ui/index.html: candidate selection status has live-region semantics and cache-busted candidates.js asset version.
+ui/tests/candidates.test.cjs: DOM-level selection, filtering, refresh, export and in-flight request coverage.
+src/tests/test_candidate_export.py: local and FastAPI export contract coverage.
+src/tests/test_candidates.py: scored candidate export regression coverage.
+
+ARTIFACTS
+MODIFIED_FILE=D:\Programs\OMRChecker\ui\candidates.js
+ADDITIONAL_MODIFIED_FILES=D:\Programs\OMRChecker\scan_ui.py; D:\Programs\OMRChecker\backend\app.py; D:\Programs\OMRChecker\ui\index.html; D:\Programs\OMRChecker\ui\tests\candidates.test.cjs; D:\Programs\OMRChecker\src\tests\test_candidates.py; D:\Programs\OMRChecker\src\tests\test_candidate_export.py
+DIFF_FILE=D:\Programs\OMRChecker\verification\candidate_export_fix_20260925\export_selection_fix.diff
+VERIFICATION_FILE=D:\Programs\OMRChecker\verification\candidate_export_fix_20260925\VERIFICATION.txt
+ROLLBACK_FILE=D:\Programs\OMRChecker\verification\candidate_export_fix_20260925\ROLLBACK.sh
+ROLLBACK_EXECUTABLE=Git Bash mode -rwxr-xr-x
+
+BASELINE
+COMMAND=node --test ui/tests/candidates.test.cjs
+INPUT=D:\Programs\OMRChecker\verification\candidate_export_fix_20260925\baseline_run_20260925_2302
+LITERAL_OUTPUT_START
+✔ search supports name, twelve-digit id and leading zeroes (0.6307ms)
+✔ confirmation filters retain distinct answer cards (0.1243ms)
+✔ candidate pagination bounds page and handles empty states (0.5232ms)
+✔ identity fields enforce twelve digit ids and paper variants (0.2105ms)
+✔ candidate UI renders untrusted names as text and shows async progress (0.357ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 101.7439
+LITERAL_OUTPUT_END
+RESULT=5 baseline UI tests passed.
+EXIT_STATUS=0
+
+COMMAND=.\.venv\Scripts\python.exe -m pytest -q src/tests/test_candidates.py src/tests/test_platform_ui.py
+INPUT=repository HEAD with original test fixtures
+LITERAL_OUTPUT_START
+.........warning: The `fitz` API is deprecated and will be removed in future. Use `import pymupdf` instead.
+..........[scan-ui] "GET /api/candidates HTTP/1.1" 200 -
+[scan-ui] "POST /api/candidates/save HTTP/1.1" 200 -
+[scan-ui] "POST /api/candidates/recognize HTTP/1.1" 200 -
+....[scan-ui] "POST /api/review/confirm-grade HTTP/1.1" 200 -
+[scan-ui] "GET /api/candidates/export.json?review_id=review-01 HTTP/1.1" 200 -
+[scan-ui] "GET /api/candidates/export.json?review_id=review-01&review_id=review-02 HTTP/1.1" 200 -
+......
+LITERAL_OUTPUT_END
+RESULT=baseline candidate and platform tests passed.
+EXIT_STATUS=0
+
+MODIFIED
+COMMAND=node --test ui/tests/*.test.cjs
+INPUT=working tree after export-selection fix
+LITERAL_OUTPUT_START
+✔ settings drafts send changed fields with native types (1.3039ms)
+✔ blank secret preserves its existing value and explicit clear sends empty string (0.2435ms)
+✔ reset takes priority and unchanged controls create an empty draft (0.1995ms)
+✔ settings access follows the administrator role (0.1525ms)
+✔ settings are available outside database-managed accounts with labeled write-only controls (2.1124ms)
+✔ admin navigation uses administrator session role (0.8014ms)
+✔ creation and edits send intended fields (0.7276ms)
+✔ pagination and storage metrics handle empty state (16.6552ms)
+✔ shell starts hidden and uses text rendering and credentials (2.4555ms)
+✔ search supports name, twelve-digit id and leading zeroes (1.0421ms)
+✔ confirmation filters retain distinct answer cards (0.2311ms)
+✔ candidate pagination bounds page and handles empty states (1.1809ms)
+✔ identity fields enforce twelve digit ids and paper variants (1.6618ms)
+✔ candidate UI renders untrusted names as text and shows async progress (0.567ms)
+✔ score availability enables pending and zero scores while excluding incomplete values (0.3619ms)
+✔ pending score checkbox updates selected count, export button and mixed select-all state (5.486ms)
+✔ filtered select-all includes scored candidates across pages and retains other selections (4.7974ms)
+✔ refresh preserves pending selected scores and drops deleted or incomplete records (3.7108ms)
+✔ download sends only selected review ids and exports the corresponding JSON (4.0747ms)
+✔ in-flight export remains disabled during refresh and suppresses duplicate requests (3.4392ms)
+✔ export error keeps selection and presents the server message for retry (2.8832ms)
+✔ correct response is green and wrong response is red (1.4206ms)
+✔ multiple answers compare as sets (0.3584ms)
+✔ ambiguous or missing reference uses pending color (0.1895ms)
+✔ empty recognized response is wrong when a reference exists (0.1262ms)
+✔ manual verdict takes precedence (0.1582ms)
+✔ corrected recognized answer updates sidebar color (1.2076ms)
+✔ true/false aliases agree with scoring normalization (0.2507ms)
+✔ cropped view coordinates preserve scan alignment (1.0925ms)
+✔ right sidebar stays beside the scan above the phone breakpoint (1.7011ms)
+✔ navigation labels include all objective question types (0.5433ms)
+✔ seven views use stable hash navigation (1.0491ms)
+✔ unknown or prototype route returns dashboard (0.1731ms)
+✔ AI passed and human confirmed answers leave pending queue (0.1781ms)
+✔ ambiguous answers and missing states stay in review queue (0.1539ms)
+✔ CSV handles quotes, newlines, Chinese and twelve-digit IDs (0.3552ms)
+✔ CSV neutralizes formula-like imported fields (1.4367ms)
+✔ paper search is trimmed and case-insensitive (0.801ms)
+✔ paper search matches custom names while keeping legacy IDs searchable (0.2432ms)
+✔ pagination handles empty and out-of-range pages (0.362ms)
+✔ import dates are derived from real identifiers (0.4478ms)
+✔ AI-only choice persists and synchronizes the grading and scanning selectors (2.9405ms)
+✔ server default initializes fresh browsers and preserves an explicit selection (3.2328ms)
+✔ single, batch, and scanner payloads carry the actual mode (1.2721ms)
+✔ accepted single review starts polling and remembers the job (2.2431ms)
+✔ transient 554 keeps polling the existing job and never resubmits (3.4553ms)
+✔ completed recognition keeps polling until AI processing finishes (1.1235ms)
+✔ terminal scheduler failure stops polling even with incomplete counters (0.915ms)
+✔ authentication expiry keeps the task id for restoration after login (0.8462ms)
+✔ late progress from an old task cannot overwrite a new task (0.7716ms)
+✔ page reload restores active task polling before displaying an old review (0.9288ms)
+✔ single upload click accepts a queued response without rendering an empty report (1.9613ms)
+✔ confirmation describes record, candidate, scans and preserved exam (0.8594ms)
+✔ cancellation leaves records and requests unchanged (0.7422ms)
+✔ success updates deleted state and notifies once (0.2998ms)
+✔ pending request suppresses duplicate submissions (0.1729ms)
+✔ network failure clears pending state for retry (0.5ms)
+✔ busy or denied deletion keeps list state (1.0905ms)
+✔ partial cleanup hides record while retaining server retry message (0.2949ms)
+✔ browser adapter clears matching selection and broadcasts deletion (2.0607ms)
+✔ views filter stale data, reset previews, and remove export selections (3.0706ms)
+✔ identity uses the real authenticated name and role (1.0051ms)
+✔ identity handles missing profiles and visitor sessions (0.1788ms)
+✔ fully checked cloud dependencies report healthy state (0.2919ms)
+✔ API ok preserves PostgreSQL connection failure (0.152ms)
+✔ API ok preserves COS connection failure (0.1346ms)
+✔ configured-only dependencies remain pending (1.1405ms)
+✔ unconfigured AI and disabled login surface setup state (0.1822ms)
+✔ local persistence reports actual local mode (0.1158ms)
+✔ waiting and failed requests have different status (0.1426ms)
+✔ shell renders server values as text and respects legacy badge timing (0.5585ms)
+✔ login modes control both fields and divider and guard repeated submits (0.654ms)
+✔ system status visibility requires an authenticated administrator (0.5258ms)
+✔ AI and manual verdicts use exactly the same live status as scoring (2.2623ms)
+✔ unknown, empty and processing statuses stay pending (0.2021ms)
+✔ group all subjective questions and preserve subquestion labels and order (0.2803ms)
+✔ all 38 subjective answer fields are represented once (0.344ms)
+✔ filters preserve total counts while showing just the selected question (0.2479ms)
+✔ current question survives polling and selection recovers when filters hide it (0.2012ms)
+✔ previous and next navigation respects visible item boundaries (0.2368ms)
+✔ confirming a pending answer updates color and removes it from pending filter (0.1519ms)
+✔ right navigation stays beside the scan until the phone breakpoint (1.5453ms)
+✔ view-only zoom and navigation keep the saved review state clean (0.4431ms)
+ℹ tests 83
+ℹ suites 0
+ℹ pass 83
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 203.4005
+LITERAL_OUTPUT_END
+RESULT=83 UI tests passed.
+EXIT_STATUS=0
+
+COMMAND=.\.venv\Scripts\python.exe -m pytest -o addopts= -q src/tests/test_candidate_export.py src/tests/test_candidates.py src/tests/test_platform_ui.py
+INPUT=working tree export contract, candidate regression and platform tests
+LITERAL_OUTPUT_START
+.....................................................................    [100%]
+============================== warnings summary ===============================
+.venv\Lib\site-packages\fastapi\testclient.py:1
+  D:\Programs\OMRChecker\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+backend\app.py:120
+  D:\Programs\OMRChecker\backend\app.py:120: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+.venv\Lib\site-packages\fastapi\applications.py:4681
+  D:\Programs\OMRChecker\.venv\Lib\site-packages\fastapi\applications.py:4681: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)  # ty: ignore[deprecated]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+69 passed, 3 warnings in 12.23s
+LITERAL_OUTPUT_END
+RESULT=69 Python tests passed.
+EXIT_STATUS=0
+
+COMMAND=.\.venv\Scripts\python.exe -m py_compile scan_ui.py backend/app.py
+INPUT=modified Python source
+LITERAL_OUTPUT_START
+LITERAL_OUTPUT_END
+RESULT=Python bytecode compilation completed.
+EXIT_STATUS=0
+
+ROLLBACK
+COMMAND="C:\Program Files\Git\bin\bash.exe" -lc "D:/Programs/OMRChecker/verification/candidate_export_fix_20260925/ROLLBACK.sh D:/Programs/OMRChecker/verification/candidate_export_fix_20260925/rollback_test_20260925_2303/workspace"
+INPUT=copy of all modified source and test files in rollback_test_20260925_2303/workspace
+LITERAL_OUTPUT_START
+ROLLBACK_RESTORED=D:/Programs/OMRChecker/verification/candidate_export_fix_20260925/rollback_test_20260925_2303/workspace
+candidates_match=True
+scan_match=True
+index_match=True
+backend_match=True
+ui_test_match=True
+test_match=True
+new_test_removed=True
+LITERAL_OUTPUT_END
+RESULT=rollback restored every baseline file and removed the generated test file.
+EXIT_STATUS=0
+RESTORED_BEHAVIOR=candidates_match=True; scan_match=True; index_match=True; backend_match=True; ui_test_match=True; test_match=True; new_test_removed=True
+WORKING_TREE_STATUS=MODIFIED_FILE remains changed after rollback test.
+MODIFIED_FILE_SHA256=ACB0483EDA4E25958417B6EEF62536032CEC2A8AB91F9D90FA9F494A57F22F38
+ORIGINAL_MODIFIED_FILE_SHA256=5C07354539CF6CC9844BC567FA697F38D7B9C351A5559531C8DA8551F313768C

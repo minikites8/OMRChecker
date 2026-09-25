@@ -1,0 +1,1 @@
+ROLLBACK_RESTORED=D:/Programs/OMRChecker/verification/candidate_export_fix_20260925/rollback_test_20260925_2303/workspace

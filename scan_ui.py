@@ -7,6 +7,7 @@ import csv
 import json
 import inspect
 import logging
+import math
 import mimetypes
 import os
 import re
@@ -29,7 +30,7 @@ from ai_judge import ai_config, ai_is_configured
 from recognition_config import recognition_settings
 from review_deletion import ReviewDeletionError, delete_record, valid_review_id
 from exam_import import import_exam_and_answers
-from exam_review import apply_ai_review, apply_manual_review, attach_structured_scores, build_review_from_structured, refresh_rule_judgments, _import_variant_for_review as exam_review_variant_for_review
+from exam_review import apply_ai_review, apply_ai_review_question, apply_manual_review, attach_structured_scores, build_review_from_structured, refresh_rule_judgments, _review_summary, _score_summary, _import_variant_for_review as exam_review_variant_for_review
 from scan_templates import TemplateManager
 from recognition_assets import DEFAULT_SCAN_ROOT, validate_recognition_assets
 from platform_admin import AdminError, AdminService, require_admin
@@ -65,6 +66,7 @@ EXAM_IMPORT_LOCK = threading.RLock()
 AI_REVIEW_LOCK = threading.RLock()
 BATCH_REVIEW_LOCK = threading.RLock()
 AI_REVIEW_WORKERS = {}
+AI_QUESTION_WORKERS = {}
 BATCH_REVIEW_WORKERS = {}
 
 
@@ -830,6 +832,9 @@ def delete_review_job(payload, actor=None, enforce_ownership=None):
         future = AI_REVIEW_WORKERS.get(identifier)
         if future and not future.done():
             return True
+        if any(key.startswith(identifier + ":") and worker and not worker.done()
+               for key, worker in AI_QUESTION_WORKERS.items()):
+            return True
         if CANDIDATE_MANAGER.is_recognizing(identifier):
             return True
         for batch_id in set(batch_ids + [str(review.get("batch_id") or "")]):
@@ -868,38 +873,63 @@ def confirm_review_grade(payload):
     return review
 
 
+def _has_exportable_score(record):
+    summary = record.get("score_summary") or {}
+    values = (summary.get("total_score"), summary.get("possible_score"))
+    if any(isinstance(value, bool) or not isinstance(value, (int, float, str)) for value in values):
+        return False
+    try:
+        total, possible = map(float, values)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(total) and math.isfinite(possible) and possible > 0
+
+
+def _export_question_result(question):
+    question_id = question.get("question_id")
+    if question_id in (None, ""):
+        question_id = question.get("question", "")
+    if isinstance(question_id, str) and question_id.strip().isdigit():
+        question_id = int(question_id.strip())
+    awarded_score = question.get("awarded_score")
+    if awarded_score is None:
+        awarded_score = question.get("score", 0)
+    status = str(question.get("status") or "").strip()
+    score_basis = str(question.get("score_basis") or "").strip()
+    remark = "；".join(value for value in (status, score_basis) if value)
+    return {"question_id": question_id, "score": awarded_score, "remark": remark}
+
+
 def export_confirmed_grades(selected_ids=None):
     records, _skipped = CANDIDATE_MANAGER.records()
     selected = {str(value).strip() for value in (selected_ids or []) if str(value).strip()}
     if selected_ids is not None and not selected:
         raise ValueError("请选择至少一名考生")
+    if selected:
+        available = {record.get("review_id") for record in records}
+        if selected - available:
+            raise ValueError("所选考生记录已更新，请刷新列表后重新选择")
+        if any(not _has_exportable_score(record) for record in records if record.get("review_id") in selected):
+            raise ValueError("所选考生成绩正在生成，请完成批改后导出")
     grades = []
     for record in records:
-        if selected and record.get("review_id") not in selected:
+        if selected:
+            if record.get("review_id") not in selected:
+                continue
+        elif not record.get("grade_confirmed") or not _has_exportable_score(record):
             continue
-        if not record.get("grade_confirmed"):
-            continue
-        summary = record.get("score_summary") or {}
-        possible = float(summary.get("possible_score", 0) or 0)
-        total = float(summary.get("total_score", 0) or 0)
         grades.append({
-            "review_id": record.get("review_id", ""),
-            "student_name": record.get("student_name", ""),
+            "student_name": str(record.get("student_name") or ""),
+            "student_id": str(record.get("student_id") or ""),
             "session_id": record.get("session_id", ""),
-            "student_id": record.get("student_id", ""),
-            "paper_type": record.get("paper_type", ""),
-            "score": summary.get("total_score", 0),
-            "possible_score": summary.get("possible_score", 0),
-            "percentage": round(total / possible * 100, 2) if possible else 0,
-            "objective_score": summary.get("objective_score", 0),
-            "text_score": summary.get("text_score", 0),
-            "failed_score": summary.get("failed_score", 0),
-            "confirmed_at": record.get("grade_confirmed_at", ""),
-            "question_scores": record.get("question_scores", []),
+            "questions": [
+                _export_question_result(question)
+                for question in record.get("question_scores", [])
+            ],
         })
     if not grades:
-        raise ValueError("所选考生暂无已确认成绩")
-    return {"ok": True, "exported_at": datetime.now().isoformat(timespec="seconds"), "count": len(grades), "grades": grades}
+        raise ValueError("暂无可导出的成绩")
+    return grades
 
 def save_manual_review(payload):
     with AI_REVIEW_LOCK:
@@ -960,6 +990,124 @@ def run_ai_review(payload):
         _write_review(review_path, latest)
     latest["report_url"] = "/reviews/{}/output/review.json".format(review_id)
     return latest
+
+
+AI_SINGLE_FIELDS = (
+    "ai_status", "ai_confidence", "ai_visual_text", "ai_reason",
+    "ai_corrected_answer", "ai_review_policy", "ai_visual_evidence",
+    "expected_answer", "final_status", "score_basis", "awarded_score",
+)
+
+
+def _ai_question_key(review_id, question):
+    return "{}:{}".format(review_id, str(question).strip())
+
+
+def _set_review_unconfirmed(review):
+    review["grade_confirmed"] = False
+    review["grade_confirmed_at"] = ""
+    blockers = grade_confirmation_blockers(review)
+    review["grade_confirmation_status"] = "待处理" if blockers else "待确认"
+    review["grade_blockers"] = blockers
+
+
+def run_ai_question_review(payload):
+    review_id, review_path, review = _load_review(payload.get("review_id"))
+    _ensure_review_scores(review)
+    question = str(payload.get("question") or "").strip()
+    target = next(
+        (item for item in review.get("items", []) if str(item.get("question", "")).strip() == question),
+        None,
+    )
+    if target is None:
+        raise ValueError("题目{}不存在".format(question or "编号为空"))
+    target["handwriting_images"] = [
+        str((review_path.parent / "handwriting" / Path(urlparse(url).path).name).resolve())
+        for url in target.get("handwriting_urls", [])
+    ]
+    updated = apply_ai_review_question(review, question)
+    with AI_REVIEW_LOCK:
+        _id, latest_path, latest = _load_review(review_id)
+        by_question = {str(item.get("question")): item for item in updated.get("items", [])}
+        source = by_question.get(question, {})
+        for item in latest.get("items", []):
+            if str(item.get("question")) == question:
+                item.update({field: source[field] for field in AI_SINGLE_FIELDS if field in source})
+                break
+        latest["ai_question_judgment"] = updated.get("ai_question_judgment", {})
+        latest["review_summary"] = _review_summary(latest.get("items", []))
+        latest["score_summary"] = _score_summary(latest)
+        _set_review_unconfirmed(latest)
+        _write_review(latest_path, latest)
+    latest["report_url"] = "/reviews/{}/output/review.json".format(review_id)
+    return latest
+
+
+def _ai_question_worker(review_id, question):
+    key = _ai_question_key(review_id, question)
+    try:
+        run_ai_question_review({"review_id": review_id, "question": question})
+    except Exception as error:
+        with AI_REVIEW_LOCK:
+            try:
+                _id, path, review = _load_review(review_id)
+                for item in review.get("items", []):
+                    if str(item.get("question", "")).strip() == str(question).strip():
+                        item["ai_status"] = "AI异常"
+                        item["ai_confidence"] = 0.0
+                        item["ai_reason"] = "AI处理失败：{}".format(error)
+                        item["ai_visual_text"] = ""
+                        item["ai_corrected_answer"] = ""
+                        break
+                review["ai_question_judgment"] = {
+                    "question": str(question).strip(), "status": "异常",
+                    "enabled": True, "processed": 0,
+                    "message": "AI处理失败：{}".format(error),
+                }
+                review["review_summary"] = _review_summary(review.get("items", []))
+                review["score_summary"] = _score_summary(review)
+                _set_review_unconfirmed(review)
+                _write_review(path, review)
+            except (OSError, ValueError):
+                pass
+    finally:
+        with AI_REVIEW_LOCK:
+            AI_QUESTION_WORKERS.pop(key, None)
+
+
+def start_ai_question_review(payload):
+    question = str(payload.get("question") or "").strip()
+    if not question:
+        raise ValueError("缺少题目编号")
+    configured = ai_is_configured()
+    with AI_REVIEW_LOCK:
+        review_id, review_path, review = _load_review(payload.get("review_id"))
+        _ensure_review_scores(review)
+        if not any(str(item.get("question", "")).strip() == question for item in review.get("items", [])):
+            raise ValueError("题目{}不存在".format(question))
+        key = _ai_question_key(review_id, question)
+        running = AI_QUESTION_WORKERS.get(key)
+        if configured and running and not running.done():
+            review["report_url"] = "/reviews/{}/output/review.json".format(review_id)
+            return review
+        if configured:
+            for item in review.get("items", []):
+                if str(item.get("question", "")).strip() == question:
+                    item["ai_status"] = "AI处理中"
+                    break
+            review["ai_question_judgment"] = {
+                "question": question, "status": "处理中", "enabled": True,
+                "processed": 0, "group_count": 1, "completed_groups": 0,
+                "message": "正在重新识别第{}题".format(question),
+            }
+            _set_review_unconfirmed(review)
+            _write_review(review_path, review)
+            AI_QUESTION_WORKERS[key] = AI_REVIEW_EXECUTOR.submit(
+                _ai_question_worker, review_id, question
+            )
+            review["report_url"] = "/reviews/{}/output/review.json".format(review_id)
+            return review
+    return run_ai_question_review({"review_id": review_id, "question": question})
 
 
 def _ai_review_worker(review_id):
@@ -1239,10 +1387,10 @@ class ScanUIHandler(BaseHTTPRequestHandler):
             elif route == "/api/candidates":
                 self.send_json(200, CANDIDATE_MANAGER.list())
             elif route == "/api/candidates/export.json":
-                query = parse_qs(parsed.query)
-                selected_ids = (query.get("review_id") or []) + (query.get("review_ids") or [])
-                selected_ids = [item for value in selected_ids for item in str(value).split(",") if item.strip()]
-                self.send_json_download(200, export_confirmed_grades(selected_ids if selected_ids else None), "已确认成绩.json")
+                query = parse_qs(parsed.query, keep_blank_values=True)
+                values = query.get("review_id", []) + query.get("review_ids", [])
+                selected_ids = [item.strip() for value in values for item in value.split(",") if item.strip()] if values else None
+                self.send_json_download(200, export_confirmed_grades(selected_ids), "考生成绩.json")
             elif route == "/api/exam/imports":
                 self.send_json(200, {"ok": True, "imports": list_exam_imports()})
             elif route == "/api/review/objective-view":
@@ -1275,7 +1423,7 @@ class ScanUIHandler(BaseHTTPRequestHandler):
         if route.startswith("/api/admin/"):
             self._admin_request("POST")
             return
-        if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/exam/import", "/api/exam/delete", "/api/review", "/api/review/batch", "/api/review/ai-judge", "/api/review/confirm", "/api/review/confirm-grade", "/api/review/delete", "/api/candidates/delete", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
+        if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/exam/import", "/api/exam/delete", "/api/review", "/api/review/batch", "/api/review/ai-judge", "/api/review/ai-judge-question", "/api/review/confirm", "/api/review/confirm-grade", "/api/review/delete", "/api/candidates/delete", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
             self.send_json(404, {"ok": False, "error": "接口不存在"})
             return
         if route != "/api/auth/login" and not self._authorize(route):
@@ -1325,6 +1473,8 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                 result = start_batch_review(payload)
             elif route == "/api/review/ai-judge":
                 result = start_ai_review(payload)
+            elif route == "/api/review/ai-judge-question":
+                result = start_ai_question_review(payload)
             elif route == "/api/review/confirm":
                 result = save_manual_review(payload)
             elif route == "/api/review/confirm-grade":

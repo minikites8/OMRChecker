@@ -1,0 +1,58 @@
+changed_branch=export-result-format
+changed_fields=scan_ui.export_confirmed_grades; scan_ui._export_question_result; local and FastAPI /api/candidates/export.json response body
+
+OUTPUT
+The download body is a JSON array. Each candidate entry has exactly:
+{"student_name":"xxx","student_id":"2026xxxxxxxx","session_id":20,"questions":[{"question_id":3001,"score":4,"remark":"status；score_basis"}]}
+remark joins status and score_basis with；. score uses awarded_score and falls back to score. Digit-only question IDs are emitted as integers.
+
+ARTIFACTS
+MODIFIED_FILE=D:\Programs\OMRChecker\verification\export_result_format_fix_20260925\MODIFIED_FILE
+DIFF_FILE=D:\Programs\OMRChecker\verification\export_result_format_fix_20260925\DIFF_FILE
+VERIFICATION.txt=D:\Programs\OMRChecker\verification\export_result_format_fix_20260925\VERIFICATION.txt
+ROLLBACK.sh=D:\Programs\OMRChecker\verification\export_result_format_fix_20260925\ROLLBACK.sh
+BASELINE_SHA256=D:\Programs\OMRChecker\verification\export_result_format_fix_20260925\BASELINE_SHA256.txt
+
+BASELINE
+Command: & 'D:\Programs\OMRChecker\.venv\Scripts\python.exe' -m pytest src/tests/test_candidate_export.py src/tests/test_candidates.py -q
+Input: pre-change export implementation and test files from the workspace snapshot.
+Literal result: candidate export and candidate-management tests passed; exit status 0.
+Command: node --test ui/tests/candidates.test.cjs
+Input: pre-change candidate UI source and test file.
+Literal result: tests 12; pass 12; fail 0; cancelled 0; skipped 0; exit status 0.
+
+MODIFIED
+Command: & 'D:\Programs\OMRChecker\.venv\Scripts\python.exe' -m pytest src/tests/test_candidate_export.py src/tests/test_candidates.py -q -rA
+Input: selected review IDs across local HTTP and FastAPI, including qid 3001, awarded score 2, status 部分正确, score_basis AI审核.
+Literal output/result: all candidate export and candidate-management tests passed; PYTEST_EXIT=0.
+Exit status: 0.
+Command: node --test ui/tests/candidates.test.cjs
+Input: modified candidate UI test fixture with the new array response body.
+Literal output/result: tests 12; pass 12; fail 0; cancelled 0; skipped 0; todo 0; duration 241.8545ms.
+Exit status: 0.
+Command: & 'D:\Programs\OMRChecker\.venv\Scripts\python.exe' -c "import json,scan_ui; print(json.dumps(scan_ui._export_question_result({'question_id':'3001','awarded_score':4,'status':'答案部分正确','score_basis':'AI审核'}),ensure_ascii=False,separators=(',',':')))"
+Input: one question export record.
+Literal output/result: warning: fitz API deprecated; {"question_id":3001,"score":4,"remark":"答案部分正确；AI审核"}.
+Exit status: 0.
+Command: & 'D:\Programs\OMRChecker\.venv\Scripts\python.exe' -m py_compile scan_ui.py; node --check ui/candidates.js
+Input: modified export module and candidate UI module.
+Literal output/result: no output; both syntax checks completed.
+Exit status: 0.
+Command: git diff --check
+Input: current workspace diff.
+Literal output/result: no whitespace errors.
+Exit status: 0.
+
+ROLLBACK
+Command: /d/Programs/OMRChecker/verification/export_result_format_fix_20260925/ROLLBACK.sh /d/Programs/OMRChecker/verification/export_result_format_fix_20260925/rollback_test/workspace
+Input: separate copy of the four modified source/test files.
+Literal output/result: ROLLBACK_OK; scan_ui.py, src/tests/test_candidate_export.py, src/tests/test_candidates.py, and ui/tests/candidates.test.cjs all matched the baseline hashes; ROLLBACK_VERIFIED.
+Exit status: 0.
+Command: main workspace hash comparison after rollback test
+Input: D:\Programs\OMRChecker.
+Literal output/result: all four MainStillModified=True; MAIN_MODIFIED_PRESERVED.
+Exit status: 0.
+ROLLBACK.sh mode: -rwxr-xr-x.
+
+RESTORED_BEHAVIOR
+The rollback copy matches the pre-export-format state. The main workspace retains the new array export branch.

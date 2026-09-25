@@ -1412,6 +1412,53 @@ def _validate_visual_judgment(item):
         item["ai_status"], item["ai_reason"] = "AI通过", "原图转录的手写行号和改错内容与参考答案一致"
 
 
+def _apply_ai_review_result(item, result):
+    """把单个题目的 AI 响应写回题目，供整体和单题重识别共用。"""
+    result_map = result.get("results", {})
+    ai_result = result_map.get(str(item.get("question", "")))
+    if ai_result:
+        item["ai_status"] = ai_result["status"]
+        item["ai_confidence"] = ai_result["confidence"]
+        item["ai_visual_text"] = _clean_visual_text(item.get("question"), ai_result.get("visual_text", ""))
+        item["ai_reason"] = ai_result["reason"]
+        item["ai_corrected_answer"] = ai_result["corrected_answer"]
+        item["ai_review_policy"] = ai_result.get("policy", AI_REVIEW_POLICY)
+        item["ai_visual_evidence"] = ai_result.get("visual_evidence", {})
+        if item["ai_visual_evidence"]:
+            item["ai_visual_text"] = _clean_visual_text(
+                item.get("question"), item["ai_visual_evidence"].get("visual_text", ""),
+            )
+            item["ai_confidence"] = min(
+                float(item["ai_confidence"] or 0),
+                float(item["ai_visual_evidence"].get("confidence", 0) or 0),
+            )
+        _validate_visual_judgment(item)
+    elif result.get("status") == "未配置":
+        item["ai_status"] = "AI待配置"
+        item["ai_confidence"] = 0.0
+        item["ai_visual_text"] = ""
+        item["ai_reason"] = result.get("message", "")
+        item["ai_corrected_answer"] = ""
+    elif result.get("status") == "异常":
+        item["ai_status"] = "AI异常"
+        item["ai_confidence"] = 0.0
+        item["ai_visual_text"] = ""
+        item["ai_reason"] = result.get("message", "")
+        item["ai_corrected_answer"] = ""
+    else:
+        item["ai_status"] = "AI跳过"
+        item["ai_confidence"] = 0.0
+        item["ai_visual_text"] = ""
+        item["ai_reason"] = result.get("message", "")
+        item["ai_corrected_answer"] = ""
+
+
+def _finalize_ai_review(review):
+    review["review_summary"] = _review_summary(review.get("items", []))
+    review["score_summary"] = _score_summary(review)
+    return review
+
+
 def apply_ai_review(review, progress_callback=None):
     for item in review.get("items", []):
         item["expected_answer"] = _normalize_correction_expected(
@@ -1421,48 +1468,34 @@ def apply_ai_review(review, progress_callback=None):
         result = judge_handwritten_items(review.get("items", []))
     else:
         result = judge_handwritten_items(review.get("items", []), progress_callback=progress_callback)
-    result_map = result.get("results", {})
     for item in review.get("items", []):
-        ai_result = result_map.get(str(item.get("question", "")))
-        if ai_result:
-            item["ai_status"] = ai_result["status"]
-            item["ai_confidence"] = ai_result["confidence"]
-            item["ai_visual_text"] = _clean_visual_text(item.get("question"), ai_result.get("visual_text", ""))
-            item["ai_reason"] = ai_result["reason"]
-            item["ai_corrected_answer"] = ai_result["corrected_answer"]
-            item["ai_review_policy"] = ai_result.get("policy", AI_REVIEW_POLICY)
-            item["ai_visual_evidence"] = ai_result.get("visual_evidence", {})
-            if item["ai_visual_evidence"]:
-                item["ai_visual_text"] = _clean_visual_text(
-                    item.get("question"), item["ai_visual_evidence"].get("visual_text", ""),
-                )
-                item["ai_confidence"] = min(
-                    float(item["ai_confidence"] or 0),
-                    float(item["ai_visual_evidence"].get("confidence", 0) or 0),
-                )
-            _validate_visual_judgment(item)
-        elif result["status"] == "未配置":
-            item["ai_status"] = "AI待配置"
-            item["ai_confidence"] = 0.0
-            item["ai_visual_text"] = ""
-            item["ai_reason"] = result["message"]
-            item["ai_corrected_answer"] = ""
-        elif result["status"] == "异常":
-            item["ai_status"] = "AI异常"
-            item["ai_confidence"] = 0.0
-            item["ai_visual_text"] = ""
-            item["ai_reason"] = result["message"]
-            item["ai_corrected_answer"] = ""
-        else:
-            item["ai_status"] = "AI跳过"
-            item["ai_confidence"] = 0.0
-            item["ai_visual_text"] = ""
-            item["ai_reason"] = result["message"]
-            item["ai_corrected_answer"] = ""
+        _apply_ai_review_result(item, result)
     review["ai_judgment"] = {key: value for key, value in result.items() if key != "results"}
-    review["review_summary"] = _review_summary(review.get("items", []))
-    review["score_summary"] = _score_summary(review)
-    return review
+    return _finalize_ai_review(review)
+
+
+def apply_ai_review_question(review, question, progress_callback=None):
+    """只对指定文字题调用 AI，并保留其他题目的已有结果。"""
+    question_key = str(question or "").strip()
+    target = next(
+        (item for item in review.get("items", []) if str(item.get("question", "")).strip() == question_key),
+        None,
+    )
+    if target is None:
+        raise ValueError("题目{}不存在".format(question_key or "编号为空"))
+    target["expected_answer"] = _normalize_correction_expected(
+        target.get("question"), target.get("expected_answer", ""), target.get("source_content", ""),
+    )
+    if progress_callback is None:
+        result = judge_handwritten_items([target])
+    else:
+        result = judge_handwritten_items([target], progress_callback=progress_callback)
+    _apply_ai_review_result(target, result)
+    review["ai_question_judgment"] = {
+        key: value for key, value in result.items() if key != "results"
+    }
+    review["ai_question_judgment"]["question"] = question_key
+    return _finalize_ai_review(review)
 
 
 def _build_review_from_maps(source_map, answers, source_meta, card_paths, image_dir=None, group_map=None, score_map=None, template_config=None, card=None):

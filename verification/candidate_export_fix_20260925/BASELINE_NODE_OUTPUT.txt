@@ -1,0 +1,13 @@
+✔ search supports name, twelve-digit id and leading zeroes (0.6307ms)
+✔ confirmation filters retain distinct answer cards (0.1243ms)
+✔ candidate pagination bounds page and handles empty states (0.5232ms)
+✔ identity fields enforce twelve digit ids and paper variants (0.2105ms)
+✔ candidate UI renders untrusted names as text and shows async progress (0.357ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 101.7439
