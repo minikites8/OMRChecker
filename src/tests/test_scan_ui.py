@@ -1,6 +1,7 @@
 import json
 import sys
 import threading
+import pytest
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -393,3 +394,12 @@ def test_batch_review_http_endpoint_reports_progress(tmp_path, monkeypatch):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_incomplete_review_report_is_retryable(tmp_path, monkeypatch):
+    monkeypatch.setattr(scan_ui, "REVIEW_ROOT", tmp_path / "reviews")
+    path = scan_ui.REVIEW_ROOT / "review-1" / "output" / "review.json"
+    path.parent.mkdir(parents=True)
+    path.write_text("{\n  \"items\":", encoding="utf-8")
+    with pytest.raises(scan_ui.ReviewDataUnavailable, match="复核结果正在生成"):
+        scan_ui.read_review_status("review-1")

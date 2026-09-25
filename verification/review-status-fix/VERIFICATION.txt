@@ -1,0 +1,46 @@
+Review status and post-review polling verification
+Date: 2026-09-25
+Branch: master
+Base commit: 9a6ba370af74387518c3065f8bbac7a50cceaeee
+Changed fields:
+- backend/app.py: /api/review/status, /api/review/batch/status, and /api/review/objective-view use JSON error responses with retryable 503 responses for transient report reads.
+- scan_ui.py: report, batch, and latest JSON writes use atomic replacement; transient partial JSON reads retry and return ReviewDataUnavailable.
+- ui/index.html: app.js cache key is review-async-20260925 so the browser loads batch polling code after deployment.
+
+Artifacts:
+MODIFIED_FILE: D:\Programs\OMRChecker\verification\review-status-fix\MODIFIED_FILE
+DIFF_FILE: D:\Programs\OMRChecker\verification\review-status-fix\DIFF_FILE
+VERIFICATION.txt: D:\Programs\OMRChecker\verification\review-status-fix\VERIFICATION.txt
+ROLLBACK.sh: D:\Programs\OMRChecker\verification\review-status-fix\ROLLBACK.sh
+
+BASELINE
+Command:
+.\.venv\Scripts\python.exe -m pytest src/tests/test_review_endpoint.py src/tests/test_scan_ui.py src/tests/test_review_async.py -o addopts= -q
+node --test ui/tests/review-async.test.cjs
+Input: detached worktree at HEAD 9a6ba370af74387518c3065f8bbac7a50cceaeee
+Literal output/result:
+30 passed, 3 warnings in 5.55s
+8 tests, 8 passed
+Exit status: 0
+
+MODIFIED
+Command:
+.\.venv\Scripts\python.exe -m pytest src/tests/test_review_endpoint.py src/tests/test_scan_ui.py src/tests/test_review_async.py -o addopts= -q
+node --test ui/tests/*.test.cjs
+git diff --check
+Input: current working tree with the review status fix and cache-busting change
+Literal output/result:
+30 passed, 3 warnings in 4.60s
+76 tests, 76 passed
+DIFF_CHECK_EXIT=0
+Exit status: 0
+
+ROLLBACK
+Command:
+& 'C:\Program Files\Git\bin\bash.exe' 'D:/Programs/OMRChecker/verification/review-status-fix/ROLLBACK.sh' 'D:/Programs/OMRChecker/tmp/verification-review-status-rollback'
+Input: detached HEAD copy with the modified files copied into it
+Literal output/result:
+ROLLBACK_RESTORED=D:/Programs/OMRChecker/tmp/verification-review-status-rollback
+ROLLBACK_EXIT=0
+Restored behavior/status: the rollback target matched HEAD for backend/app.py, scan_ui.py, src/tests/test_review_endpoint.py, src/tests/test_scan_ui.py, and ui/index.html; git diff --exit-code returned 0. The active master worktree keeps the modified files.
+Exit status: 0

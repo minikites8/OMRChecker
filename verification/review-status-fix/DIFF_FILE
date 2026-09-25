@@ -1,0 +1,212 @@
+diff --git a/backend/app.py b/backend/app.py
+index 5e788c2..60b18bb 100644
+--- a/backend/app.py
++++ b/backend/app.py
+@@ -71,6 +71,11 @@ def _review_error_response(request: Request, error: Exception) -> JSONResponse:
+         message = str(error)
+         extra = {"log_tail": str(getattr(error, "log", ""))[-12000:]}
+         logger.error("复核扫描失败 path=%s error=%s", request.url.path, message)
++    elif isinstance(error, legacy.ReviewDataUnavailable):
++        status = 503
++        message = str(error)
++        extra = {"retryable": True}
++        logger.warning("复核结果暂不可用 path=%s error=%s", request.url.path, message)
+     else:
+         status = 503
+         message = "批改服务暂时失败，请稍后重试"
+@@ -300,21 +305,21 @@ def exam_imports(request: Request) -> dict:
+
+
+ @app.get("/api/review/objective-view")
+-def objective_view(request: Request, review_id: str = "") -> dict:
++def objective_view(request: Request, review_id: str = "") -> JSONResponse:
+     current_user(request)
+-    return legacy.read_objective_view(review_id)
++    return _review_response(request, lambda: legacy.read_objective_view(review_id))
+
+
+ @app.get("/api/review/status")
+-def review_status(request: Request, review_id: str = "") -> dict:
++def review_status(request: Request, review_id: str = "") -> JSONResponse:
+     current_user(request)
+-    return legacy.read_review_status(review_id)
++    return _review_response(request, lambda: legacy.read_review_status(review_id))
+
+
+ @app.get("/api/review/batch/status")
+-def batch_status(request: Request, batch_id: str = "") -> dict:
++def batch_status(request: Request, batch_id: str = "") -> JSONResponse:
+     current_user(request)
+-    return legacy.read_batch_status(batch_id)
++    return _review_response(request, lambda: legacy.read_batch_status(batch_id))
+
+
+ @app.post("/api/scan")
+diff --git a/scan_ui.py b/scan_ui.py
+index 61c9839..debfca6 100644
+--- a/scan_ui.py
++++ b/scan_ui.py
+@@ -94,6 +94,41 @@ class ScanFailure(RuntimeError):
+         self.log = log
+
+
++class ReviewDataUnavailable(RuntimeError):
++    """复核文件正在写入或暂时无法读取。"""
++
++
++def _write_json_atomic(path, value):
++    path = Path(path)
++    path.parent.mkdir(parents=True, exist_ok=True)
++    temporary = path.with_name(".{}-{}.tmp".format(path.name, uuid.uuid4().hex))
++    temporary.write_text(
++        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
++        encoding="utf-8",
++    )
++    temporary.replace(path)
++
++
++def _read_json_file(path, description):
++    path = Path(path)
++    last_error = None
++    for attempt in range(4):
++        try:
++            raw = path.read_text(encoding="utf-8")
++            if not raw.strip():
++                raise json.JSONDecodeError("empty document", raw, 0)
++            return json.loads(raw)
++        except json.JSONDecodeError as error:
++            last_error = error
++            if attempt < 3:
++                time.sleep(0.03)
++                continue
++            raise ReviewDataUnavailable(
++                "{}正在生成，请稍后重试".format(description)
++            ) from last_error
++    raise ReviewDataUnavailable("{}暂时不可用，请稍后重试".format(description))
++
++
+ def safe_filename(name, index=1):
+     candidate = Path(str(name or "")).name.strip()
+     candidate = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", candidate)
+@@ -413,14 +448,14 @@ def _create_review_report(import_id, normalized_path, imported, card_files,
+             )
+     with AI_REVIEW_LOCK:
+         report_path = output_dir / "review.json"
+-        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
++        _write_json_atomic(report_path, report)
+         if update_latest:
+             latest_path = REVIEW_ROOT / "latest.json"
+-            latest_path.write_text(json.dumps({"review_id": review_id}, ensure_ascii=False) + "\n", encoding="utf-8")
++            _write_json_atomic(latest_path, {"review_id": review_id})
+         if ai_is_configured():
+             return start_ai_review({"review_id": review_id})
+         report["ai_judgment"] = {"status": "未配置", "enabled": False, "processed": 0, "message": "AI接口等待配置"}
+-        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
++        _write_json_atomic(report_path, report)
+         PLATFORM_PERSISTENCE.sync_tree(review_root, "review", owner_user_id, relative_prefix=Path(review_id))
+         report["report_url"] = "/reviews/{}/output/review.json".format(review_id)
+         return report
+@@ -506,8 +541,7 @@ def _batch_path(batch_id):
+
+
+ def _write_batch(path, batch):
+-    path.parent.mkdir(parents=True, exist_ok=True)
+-    path.write_text(json.dumps(batch, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
++    _write_json_atomic(path, batch)
+
+
+ def _compact_review(report, label=""):
+@@ -600,9 +634,9 @@ def _batch_review_worker(batch_id, import_id, normalized_path, imported, groups,
+             )
+             _write_batch(batch_path, batch)
+         if successful:
+-            (REVIEW_ROOT / "latest.json").write_text(
+-                json.dumps({"review_id": successful[0]["review_id"]}, ensure_ascii=False) + "\n",
+-                encoding="utf-8",
++            _write_json_atomic(
++                REVIEW_ROOT / "latest.json",
++                {"review_id": successful[0]["review_id"]},
+             )
+     except Exception as error:
+         logging.getLogger("omrchecker.review").exception("后台批改调度失败 batch_id=%s", batch_id)
+@@ -707,11 +741,14 @@ def _load_review(review_id):
+     review_path = resolve_under(REVIEW_ROOT, Path(clean_id) / "output" / "review.json")
+     if not review_path.is_file():
+         raise ValueError("复核任务不存在")
+-    return clean_id, review_path, json.loads(review_path.read_text(encoding="utf-8"))
++    review = _read_json_file(review_path, "复核结果")
++    if not isinstance(review, dict):
++        raise ReviewDataUnavailable("复核结果格式无效，请重新提交批改")
++    return clean_id, review_path, review
+
+
+ def _write_review(path, review):
+-    path.write_text(json.dumps(review, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
++    _write_json_atomic(path, review)
+     try:
+         relative = Path(path).resolve().relative_to(REVIEW_ROOT.resolve())
+         PLATFORM_PERSISTENCE.sync_file(
+diff --git a/src/tests/test_review_endpoint.py b/src/tests/test_review_endpoint.py
+index cd32a62..b9190e2 100644
+--- a/src/tests/test_review_endpoint.py
++++ b/src/tests/test_review_endpoint.py
+@@ -49,3 +49,24 @@ def test_frontend_reads_json_or_plain_error_response():
+     assert "async function readReviewResponse(response)" in source
+     assert "服务器返回了无效响应" in source
+     assert "readReviewResponse(response)" in source
++
++
++def test_review_status_returns_json_when_report_reading_fails(monkeypatch):
++    monkeypatch.setattr(backend_app, "current_user", lambda _request: {"id": "test-user", "sub": "test-user"})
++    monkeypatch.setattr(backend_app.legacy, "read_review_status", lambda _review_id: (_ for _ in ()).throw(RuntimeError("private status failure")))
++    client = TestClient(backend_app.app, raise_server_exceptions=False)
++    response = client.get("/api/review/status", params={"review_id": "review-1"})
++    assert response.status_code == 503
++    assert response.headers["content-type"].startswith("application/json")
++    assert response.json() == {"ok": False, "error": "批改服务暂时失败，请稍后重试"}
++    assert "Internal Server Error" not in response.text
++
++
++def test_review_status_marks_transient_report_read_as_retryable(monkeypatch):
++    monkeypatch.setattr(backend_app, "current_user", lambda _request: {"id": "test-user", "sub": "test-user"})
++    error = backend_app.legacy.ReviewDataUnavailable("复核结果正在生成，请稍后重试")
++    monkeypatch.setattr(backend_app.legacy, "read_review_status", lambda _review_id: (_ for _ in ()).throw(error))
++    client = TestClient(backend_app.app, raise_server_exceptions=False)
++    response = client.get("/api/review/status", params={"review_id": "review-1"})
++    assert response.status_code == 503
++    assert response.json() == {"ok": False, "error": "复核结果正在生成，请稍后重试", "retryable": True}
+diff --git a/src/tests/test_scan_ui.py b/src/tests/test_scan_ui.py
+index 4444f87..d28e05c 100644
+--- a/src/tests/test_scan_ui.py
++++ b/src/tests/test_scan_ui.py
+@@ -1,6 +1,7 @@
+ import json
+ import sys
+ import threading
++import pytest
+ from pathlib import Path
+ from urllib.request import Request, urlopen
+
+@@ -393,3 +394,12 @@ def test_batch_review_http_endpoint_reports_progress(tmp_path, monkeypatch):
+         server.shutdown()
+         server.server_close()
+         thread.join(timeout=5)
++
++
++def test_incomplete_review_report_is_retryable(tmp_path, monkeypatch):
++    monkeypatch.setattr(scan_ui, "REVIEW_ROOT", tmp_path / "reviews")
++    path = scan_ui.REVIEW_ROOT / "review-1" / "output" / "review.json"
++    path.parent.mkdir(parents=True)
++    path.write_text("{\n  \"items\":", encoding="utf-8")
++    with pytest.raises(scan_ui.ReviewDataUnavailable, match="复核结果正在生成"):
++        scan_ui.read_review_status("review-1")
+diff --git a/ui/index.html b/ui/index.html
+index 1211626..31c0381 100644
+--- a/ui/index.html
++++ b/ui/index.html
+@@ -252,4 +252,4 @@
+ </section>
+
+ <footer class="workspace-footer"><span>阅卷台 · 试卷自动批改平台</span><span id="platformServiceStatus">正在检查服务状态</span></footer>
+-</main></div><div class="error-toast" id="errorToast" role="alert"></div><div class="platform-toast" id="platformToast" role="status"></div><script src="/static/platform.js?v=delete-1" defer></script><script src="/static/api.js?v=20260923" defer></script><script src="/static/auth.js?v=admin-1" defer></script><script src="/static/admin.js?v=1" defer></script><script src="/static/admin-settings.js?v=1" defer></script><script src="/static/saas.js?v=storage-admin-1" defer></script><script src="/static/objective-view.js?v=20260920-sidebar" defer></script><script src="/static/candidates.js?v=delete-1" defer></script><script src="/static/subjective-view.js?v=20260920" defer></script><script src="/static/templates.js?v=20260921" defer></script><script src="/static/review-deletion.js?v=1" defer></script><script src="/static/app.js?v=delete-1" defer></script></body></html>
++</main></div><div class="error-toast" id="errorToast" role="alert"></div><div class="platform-toast" id="platformToast" role="status"></div><script src="/static/platform.js?v=delete-1" defer></script><script src="/static/api.js?v=20260923" defer></script><script src="/static/auth.js?v=admin-1" defer></script><script src="/static/admin.js?v=1" defer></script><script src="/static/admin-settings.js?v=1" defer></script><script src="/static/saas.js?v=storage-admin-1" defer></script><script src="/static/objective-view.js?v=20260920-sidebar" defer></script><script src="/static/candidates.js?v=delete-1" defer></script><script src="/static/subjective-view.js?v=20260920" defer></script><script src="/static/templates.js?v=20260921" defer></script><script src="/static/review-deletion.js?v=1" defer></script><script src="/static/app.js?v=review-async-20260925" defer></script></body></html>

@@ -71,6 +71,11 @@ def _review_error_response(request: Request, error: Exception) -> JSONResponse:
         message = str(error)
         extra = {"log_tail": str(getattr(error, "log", ""))[-12000:]}
         logger.error("复核扫描失败 path=%s error=%s", request.url.path, message)
+    elif isinstance(error, legacy.ReviewDataUnavailable):
+        status = 503
+        message = str(error)
+        extra = {"retryable": True}
+        logger.warning("复核结果暂不可用 path=%s error=%s", request.url.path, message)
     else:
         status = 503
         message = "批改服务暂时失败，请稍后重试"
@@ -300,21 +305,21 @@ def exam_imports(request: Request) -> dict:
 
 
 @app.get("/api/review/objective-view")
-def objective_view(request: Request, review_id: str = "") -> dict:
+def objective_view(request: Request, review_id: str = "") -> JSONResponse:
     current_user(request)
-    return legacy.read_objective_view(review_id)
+    return _review_response(request, lambda: legacy.read_objective_view(review_id))
 
 
 @app.get("/api/review/status")
-def review_status(request: Request, review_id: str = "") -> dict:
+def review_status(request: Request, review_id: str = "") -> JSONResponse:
     current_user(request)
-    return legacy.read_review_status(review_id)
+    return _review_response(request, lambda: legacy.read_review_status(review_id))
 
 
 @app.get("/api/review/batch/status")
-def batch_status(request: Request, batch_id: str = "") -> dict:
+def batch_status(request: Request, batch_id: str = "") -> JSONResponse:
     current_user(request)
-    return legacy.read_batch_status(batch_id)
+    return _review_response(request, lambda: legacy.read_batch_status(batch_id))
 
 
 @app.post("/api/scan")

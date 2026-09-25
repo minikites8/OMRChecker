@@ -49,3 +49,24 @@ def test_frontend_reads_json_or_plain_error_response():
     assert "async function readReviewResponse(response)" in source
     assert "服务器返回了无效响应" in source
     assert "readReviewResponse(response)" in source
+
+
+def test_review_status_returns_json_when_report_reading_fails(monkeypatch):
+    monkeypatch.setattr(backend_app, "current_user", lambda _request: {"id": "test-user", "sub": "test-user"})
+    monkeypatch.setattr(backend_app.legacy, "read_review_status", lambda _review_id: (_ for _ in ()).throw(RuntimeError("private status failure")))
+    client = TestClient(backend_app.app, raise_server_exceptions=False)
+    response = client.get("/api/review/status", params={"review_id": "review-1"})
+    assert response.status_code == 503
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json() == {"ok": False, "error": "批改服务暂时失败，请稍后重试"}
+    assert "Internal Server Error" not in response.text
+
+
+def test_review_status_marks_transient_report_read_as_retryable(monkeypatch):
+    monkeypatch.setattr(backend_app, "current_user", lambda _request: {"id": "test-user", "sub": "test-user"})
+    error = backend_app.legacy.ReviewDataUnavailable("复核结果正在生成，请稍后重试")
+    monkeypatch.setattr(backend_app.legacy, "read_review_status", lambda _review_id: (_ for _ in ()).throw(error))
+    client = TestClient(backend_app.app, raise_server_exceptions=False)
+    response = client.get("/api/review/status", params={"review_id": "review-1"})
+    assert response.status_code == 503
+    assert response.json() == {"ok": False, "error": "复核结果正在生成，请稍后重试", "retryable": True}
