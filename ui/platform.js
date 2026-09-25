@@ -3,7 +3,7 @@
   'use strict';
   const views = {
     admin: ['管理面板', '管理平台账号、访问权限与操作记录。', '系统管理'],
-    dashboard: ['工作台', '从试卷导入到成绩复核，让批改更有条理。', '教学工作台'],
+    dashboard: ['阅卷工作台', '管理试卷、跟进批改、确认成绩，在一个工作空间内完成。', '教学工作空间'],
     papers: ['试卷管理', '管理结构化试卷与参考答案，建立统一批改标准。', '教学管理'],
     candidates: ['考生管理', '对照姓名原图确认考生信息，按姓名或学号查找答卷。', '教学管理'],
     grading: ['批量批改', '上传答题卡，自动识别并跟进每份试卷的批改进度。', '教学管理'],
@@ -99,7 +99,7 @@
   document.addEventListener('keydown', event => { if (event.key === 'Escape' && document.body.classList.contains('nav-open')) { closeMenu(); $('menuToggle').focus(); } });
   function openImport() {
     $('importEditor').hidden = false;
-    $('importEditor').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    $('importEditor').scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion:reduce)').matches ? 'instant' : 'smooth', block: 'start' });
     $('examImportName').focus({ preventScroll: true });
   }
   $('openImport').addEventListener('click', openImport);
@@ -161,7 +161,7 @@
   });
   window.addEventListener('platform:health', event => {
     const health = event.detail;
-    $('platformServiceStatus').textContent = health.ok ? '本地服务已连接 · AI ' + (health.ai_judgment?.configured ? '已就绪' : '待配置') : '服务连接异常，请检查服务运行状态';
+    $('platformServiceStatus').textContent = health.ok ? '阅卷服务已连接 · AI ' + (health.ai_judgment?.configured ? '已就绪' : '待配置') : '服务连接异常，请检查服务运行状态';
   });
   function currentPending() {
     return reviewState.objective.filter(item => isPending(objectiveLocalStatus(item))).length + reviewState.items.filter(item => isPending(textLocalStatus(item))).length;
@@ -204,7 +204,7 @@
     return pending > 0 ? ['待复核', 'warning'] : ['已出分', 'success'];
   }
   function renderRecords() {
-    const rows = Array.from(model.records.values()).reverse();
+    const rows = Array.from(model.records.values()).filter(record => !window.reviewDeletion?.isDeleted(record.review_id)).reverse();
     const body = $('recentReviewRows'); body.replaceChildren();
     rows.slice(0, 5).forEach(record => {
       const row = element('tr'), titleCell = element('td');
@@ -219,7 +219,13 @@
         if (record.review_id === reviewState.reviewId) navigate('results');
         else loadBatchReview(record.review_id);
       });
-      actionCell.append(button); row.append(titleCell, scoreCell, statusCell, actionCell); body.append(row);
+      actionCell.append(button);
+      if (record.review_id) {
+        const remove = element('button', 'text-link review-delete-button', '删除'); remove.type = 'button';
+        remove.setAttribute('aria-label', '删除批改记录及考生信息 ' + record.review_id);
+        remove.addEventListener('click', () => window.reviewDeletion.remove(record, remove)); actionCell.append(remove);
+      }
+      row.append(titleCell, scoreCell, statusCell, actionCell); body.append(row);
     });
     if (!rows.length) emptyRow(body, 4, model.ready ? '还没有批改记录，上传答题卡开始批改。' : '批改记录加载中…');
     const selector = $('reviewRecordSelect');
@@ -251,6 +257,7 @@
     renderRecords(); applyFilter();
   });
   window.addEventListener('platform:review', event => {
+    if (window.reviewDeletion?.isDeleted(event.detail.result.review_id)) return;
     const { result, navigate: shouldNavigate } = event.detail;
     if (model.current?.review_id !== result.review_id) { model.dirty = false; $('reviewSaveStatus').textContent = ''; }
     model.current = result;
@@ -275,6 +282,7 @@
     $('statCompleted').textContent = batch.completed || 0;
     $('statCompletedHint').textContent = '共 ' + (batch.total || 0) + ' 份 · 失败 ' + (batch.failed || 0) + ' 份';
     (batch.reviews || []).forEach((record, index) => {
+      if (window.reviewDeletion?.isDeleted(record.review_id)) return;
       const pendingKey = (batch.batch_id || 'batch') + '-' + index;
       if (record.review_id) model.records.delete(pendingKey);
       // Preserve unsaved on-screen scores while a batch poll is in flight.
@@ -283,6 +291,18 @@
       } else model.records.set(record.review_id || pendingKey, record);
     });
     renderRecords();
+  });
+  window.addEventListener('platform:review-deleted', event => {
+    const id = event.detail.review_id; model.records.delete(id);
+    if (model.current?.review_id === id) { model.current = null; model.dirty = false; }
+    if (model.batch) {
+      model.batch.reviews = (model.batch.reviews || []).filter(record => record.review_id !== id);
+      model.batch.total = model.batch.reviews.length;
+      model.batch.completed = model.batch.reviews.filter(record => record.status === '已完成').length;
+      $('statCompleted').textContent = model.batch.completed;
+      $('statCompletedHint').textContent = '当前保留 ' + model.batch.total + ' 份记录';
+    } else if (!model.current) { $('statCompleted').textContent = '—'; $('statCompletedHint').textContent = '等待批改任务'; }
+    renderRecords(); toast('批改记录及对应考生信息已删除。');
   });
   window.addEventListener('platform:selection', () => {
     model.current = null; model.dirty = false; model.batch = null;

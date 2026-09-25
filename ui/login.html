@@ -3,25 +3,41 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1c2e50">
+  <meta name="description" content="登录阅卷台，进入试卷管理、AI 辅助批改与成绩复核工作空间。">
   <title>登录 · 阅卷台</title>
-  <link rel="stylesheet" href="/static/login.css">
+  <link rel="stylesheet" href="/static/login.css?v=saas-1">
 </head>
 <body>
   <main class="login-shell">
-    <section class="login-card" aria-labelledby="loginTitle">
-      <p class="eyebrow">OMRChecker</p>
-      <h1 id="loginTitle">登录阅卷台</h1>
-      <p class="subtitle">使用统一身份认证或内置账号进入试卷自动批改平台。</p>
-      <a class="oidc-button" id="oidcLogin" href="/auth/oidc/start" hidden>使用统一身份认证登录</a>
-      <div class="divider"><span>内置账号</span></div>
-      <form id="loginForm">
-        <label>邮箱<input name="email" type="email" autocomplete="username" required></label>
-        <label>密码<input name="password" type="password" autocomplete="current-password" required></label>
-        <button type="submit">登录</button>
-      </form>
-      <p class="message" id="loginMessage" role="alert"></p>
+    <section class="login-story" aria-labelledby="storyTitle">
+      <a class="login-brand" href="/" aria-label="阅卷台首页"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6c-3-2-6-2-9-1v14c3-1 6-1 9 1 3-2 6-2 9-1V5c-3-1-6-1-9 1zm0 0v14"/></svg></span><span>阅卷台<small>试卷自动批改平台</small></span></a>
+      <div class="story-content"><span class="story-eyebrow">为每一次教学反馈而设计</span><h1 id="storyTitle">少一些重复批改，<br>多一些教学思考。</h1><p>连接试卷、答题卡与成绩，<br>让阅卷流程清晰有序。</p>
+        <div class="story-workflow" aria-label="阅卷工作流程"><div><span>01</span><strong>建立批改标准</strong><small>导入试卷与参考答案</small></div><div><span>02</span><strong>AI 辅助识别</strong><small>批量处理照片与 PDF</small></div><div><span>03</span><strong>复核并确认成绩</strong><small>保留关键判断与结果</small></div></div>
+      </div>
+      <p class="story-footer">AI 辅助判断，最终结果由教师确认。</p>
+    </section>
+    <section class="login-content" aria-labelledby="loginTitle">
+      <div class="login-card">
+        <p class="eyebrow">欢迎回到阅卷台</p>
+        <h2 id="loginTitle">登录工作空间</h2>
+        <p class="subtitle" id="loginSubtitle">使用平台账号或统一身份认证继续。</p>
+        <p class="login-loading" id="loginLoading" role="status">正在读取登录配置…</p>
+        <a class="oidc-button" id="oidcLogin" href="/auth/oidc/start" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6z"/><path d="m8 12 3 3 5-6"/></svg>使用统一身份认证登录<svg class="login-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 12h16m-6-6 6 6-6 6"/></svg></a>
+        <div class="divider" id="loginDivider" hidden><span>或使用平台账号</span></div>
+        <form id="loginForm" hidden>
+          <label for="loginEmail">邮箱地址<input id="loginEmail" name="email" type="email" autocomplete="username" inputmode="email" autocapitalize="none" spellcheck="false" placeholder="name@school.edu" required></label>
+          <label for="loginPassword">登录密码<span class="password-field"><input id="loginPassword" name="password" type="password" autocomplete="current-password" placeholder="请输入登录密码" required><button class="password-toggle" id="passwordToggle" type="button" aria-label="显示密码" aria-pressed="false" aria-controls="loginPassword">显示</button></span></label>
+          <button class="login-submit" id="loginSubmit" type="submit">登录工作空间<span aria-hidden="true">→</span></button>
+        </form>
+        <p class="message" id="loginMessage" role="alert" aria-live="polite"></p>
+        <button class="retry-button" id="loginRetry" type="button" hidden>重新连接登录服务</button>
+        <p class="login-help">账号与访问权限由平台管理员统一管理。</p>
+      </div>
+      <footer class="login-footer"><span>OMRChecker</span><span>专注教学 · 有序阅卷</span></footer>
     </section>
   </main>
-  <script src="/static/login.js"></script>
+  <script src="/static/api.js?v=20260923" defer></script>
+  <script src="/static/login.js?v=saas-1" defer></script>
 </body>
 </html>

@@ -45,7 +45,12 @@
   }
   function drawDetails(force=false){
     const record=selected();$('candidateForm').hidden=!record;$('candidateDetailEmpty').hidden=!!record;
-    if(!record)return;
+    if(!record){
+      ['candidateName','candidateStudentId','candidatePaperType'].forEach(id=>{$(id).value='';});
+      $('candidateDetailHeading').textContent='考生信息';$('candidateDetailSub').textContent='从列表选择一份答卷';
+      $('candidateNameImage').removeAttribute('src');$('candidateNameImage').hidden=true;
+      $('candidateOcrText').textContent='';$('candidateSaveStatus').textContent='';return;
+    }
     $('candidateDetailHeading').textContent=record.student_name||'姓名待确认';
     $('candidateDetailSub').textContent=record.student_id||'学号待确认';
     if(state.dirty&&!force)return;
@@ -85,6 +90,7 @@
       score.append(node('strong','numeric',Number(summary.possible_score)>0?number(summary.total_score)+' / '+number(summary.possible_score):'待出分'),node('small','table-subtitle',record.paper_type?record.paper_type+' 卷':'卷型待确认'));
       const status=node('td'),grade=gradeStatus(record);status.append(node('span','status-pill '+(record.student_name_status==='已确认'?'success':'warning'),record.student_name_status||'待识别'),node('span','status-pill '+grade.className,grade.label));
       const actions=node('td'),button=node('button','text-link','管理');button.type='button';button.setAttribute('aria-label','管理答卷 '+record.review_id);button.addEventListener('click',()=>selectRecord(record));actions.append(button);
+      const remove=node('button','text-link review-delete-button','删除');remove.type='button';remove.setAttribute('aria-label','删除答卷及考生信息 '+record.review_id);remove.addEventListener('click',()=>window.reviewDeletion.remove(record,remove));actions.append(remove);
       row.append(selectCell,identity,score,status,actions);body.append(row);
     });
     if(!page.items.length){const row=node('tr'),cell=node('td','table-empty',state.loading?'正在加载考生记录…':state.records.length?'当前筛选下暂无考生':'上传答题卡后，这里会显示考生信息。');cell.colSpan=5;row.append(cell);body.append(row);}
@@ -95,7 +101,7 @@
     if(showLoading){state.loading=true;message('正在加载考生记录…');$('candidateRefresh').disabled=true;draw();}
     try{
       const result=await request('/api/candidates');if(sequence!==state.sequence)return;
-      state.records=result.candidates||[];
+      state.records=(result.candidates||[]).filter(record=>!window.reviewDeletion?.isDeleted(record.review_id));
       if(!state.selected)state.selected=localStorage.getItem('omrCandidateReviewId')||localStorage.getItem('omrActiveReviewId')||state.records[0]?.review_id||'';
       if(!selected()){state.selected=state.records[0]?.review_id||'';state.dirty=false;}
       state.loading=false;draw();drawJob(result.name_job);
@@ -142,9 +148,16 @@
     }catch(error){message(error.message)}finally{button.disabled=state.selectedIds.size===0;}
   });
   $('candidateRecognize').addEventListener('click',()=>{if(selected())recognize([state.selected]);});
+  $('candidateDelete').addEventListener('click',()=>{if(selected()&&!state.saving)window.reviewDeletion.remove(selected(),$('candidateDelete'));});
   $('candidateOpenReview').addEventListener('click',async()=>{
     if(state.dirty&&!window.confirm('考生信息尚未保存，确认查看答卷？'))return;
     if(!selected())return;await loadBatchReview(state.selected);
+  });
+  window.addEventListener('platform:review-deleted',event=>{
+    const id=event.detail.review_id;
+    state.records=state.records.filter(record=>record.review_id!==id);state.selectedIds.delete(id);
+    if(state.selected===id){state.selected='';state.dirty=false;}
+    draw();message('批改记录及对应考生信息已删除。');
   });
   window.addEventListener('hashchange',()=>{if(location.hash==='#candidates')refresh();});
   window.addEventListener('platform:review',()=>{if(location.hash==='#candidates')refresh(false);});

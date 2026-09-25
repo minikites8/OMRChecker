@@ -147,16 +147,30 @@
         if (response.ok) { manifest = { ...await response.json(), ok: true, asset_base: base }; }
         else { response = await fetch('/api/review/objective-view?review_id=' + encodeURIComponent(id), { signal: state.controller.signal }); manifest = await response.json(); }
         if (!response.ok || !manifest.ok) throw new Error(manifest.error || '扫描图读取失败');
-        state.cache.set(id, manifest);
       }
       if (sequence !== state.sequence || state.id !== id) return;
+      state.cache.set(id, manifest);
       state.manifest = manifest; drawImage();
     } catch (error) {
       if (error.name === 'AbortError' || sequence !== state.sequence) return;
       $('objectiveLoading').hidden = false; $('objectiveLoading').textContent = error.message; $('objectiveRetry').hidden = false;
     } finally { if (sequence === state.sequence) state.loadingId = ''; }
   }
+  function clear(reviewId = state.id) {
+    state.cache.delete(reviewId);
+    if (reviewId !== state.id) return;
+    ++state.sequence;
+    if (state.controller) state.controller.abort();
+    state.controller = null; state.id = ''; state.loadingId = '';
+    state.items = []; state.selected = ''; state.manifest = null;
+    $('objectivePageImage')?.removeAttribute('src');
+    ['objectiveSvg', 'objectiveQuestionGrid', 'objectiveDetailSlot'].forEach(id => $(id)?.replaceChildren());
+    ['objectiveSelectedCaption', 'objectiveQuestionCount', 'objectiveActiveHeading', 'objectiveActiveVerdict'].forEach(id => { if ($(id)) $(id).textContent = ''; });
+    ['objectiveCorrectCount', 'objectiveWrongCount', 'objectiveUncertainCount'].forEach(id => { if ($(id)) $(id).textContent = '0'; });
+    ['objectiveWorkspace', 'objectiveImageStage', 'objectiveLoading', 'objectiveRetry'].forEach(id => { if ($(id)) $(id).hidden = true; });
+  }
   function render(items, reviewId) {
+    if (!reviewId) { clear(); return; }
     setup(); const changed = state.id !== reviewId; state.id = reviewId; state.items = items;
     if (changed) { state.selected = String(items[0]?.question || ''); state.mode = 'focus'; $('objectiveViewMode').value = 'focus'; $('objectiveZoom').value = '100'; $('objectiveImageStage').style.width = '100%'; state.manifest = null; }
     drawNavigation(); updateVisuals();
@@ -166,6 +180,6 @@
     state.filter = filter; if (!$('objectiveWorkspace')) return 0;
     const visible = itemsInFilter().length; $('objectiveWorkspace').hidden = visible === 0; syncSelection(); return visible;
   }
-  window.objectiveView = { render, update: updateVisuals, setFilter };
+  window.objectiveView = { render, clear, update: updateVisuals, setFilter };
   window.addEventListener('platform:score', updateVisuals);
 })();

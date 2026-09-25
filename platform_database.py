@@ -299,3 +299,14 @@ class PostgresStore:
                 VALUES (%s,%s,%s,'user',%s,%s::jsonb)""",
                 (uuid.uuid4().hex, actor_id, action, user_id, json.dumps(details, ensure_ascii=False)))
             return row
+
+
+    def delete_review_artifacts(self, review_id: str, prefix: str) -> None:
+        with self.connection() as connection:
+            connection.execute(
+                "DELETE FROM platform_artifacts WHERE kind = %s "
+                "AND LEFT(object_key, LENGTH(%s)) = %s", ("review", prefix, prefix),
+            )
+            connection.execute(
+                "DELETE FROM platform_jobs WHERE kind = %s AND id = %s", ("review", review_id),
+            )

@@ -84,7 +84,7 @@ def test_main_accepts_ui_flag(monkeypatch):
 def test_ui_prompts_are_chinese_and_support_twelve_digits():
     html = (scan_ui.UI_ROOT / "index.html").read_text(encoding="utf-8")
     javascript = (scan_ui.UI_ROOT / "app.js").read_text(encoding="utf-8")
-    assert "本地扫描工作台" in html
+    assert "阅卷工作空间" in html
     assert "查看处理日志" not in html
     assert "STEP 1" not in html
     assert "<option selected>12</option>" in html

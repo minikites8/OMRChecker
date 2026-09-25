@@ -103,6 +103,7 @@ class CandidateManager:
         self.preview_builder=preview_builder;self.recognizer=recognizer
         self.executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='candidate-name')
         self.lock=threading.RLock();self.future=None
+        self.pending_review_ids=set()
         self.job={'status':'空闲','total':0,'completed':0,'failed':0,'message':''}
 
     def records(self):
@@ -150,14 +151,17 @@ class CandidateManager:
             identifiers=[r['review_id'] for r in records if not r['name_recognition_version'] and r['student_name_source']!='manual']
         if not isinstance(identifiers,list) or len(identifiers)>1000:raise ValueError('每次最多识别 1000 份答题卡')
         identifiers=list(dict.fromkeys(valid_id(value) for value in identifiers))
-        for identifier in identifiers:
-            with self.review_lock:self.load(identifier)
-        with self.lock:
+        with self.review_lock, self.lock:
+            for identifier in identifiers:self.load(identifier)
             if self.future and not self.future.done():return {'ok':True,'name_job':dict(self.job)}
             self.job={'status':'处理中' if identifiers else '已完成','total':len(identifiers),
                       'completed':0,'failed':0,'message':'正在识别姓名…' if identifiers else '姓名记录已更新'}
+            self.pending_review_ids=set(identifiers)
             if identifiers:self.future=self.executor.submit(self._run,identifiers)
             return {'ok':True,'name_job':dict(self.job)}
+
+    def is_recognizing(self, identifier):
+        with self.lock:return identifier in self.pending_review_ids
 
     def _run(self,identifiers):
         for identifier in identifiers:
@@ -194,7 +198,9 @@ class CandidateManager:
                         self.write(path,review)
                 except (OSError,ValueError):pass
             finally:
-                with self.lock:self.job['completed']+=1
+                with self.lock:
+                    self.job['completed']+=1
+                    self.pending_review_ids.discard(identifier)
         with self.lock:
             self.job['status']='已完成'
             self.job['message']='姓名识别完成：{} 份，异常 {} 份'.format(self.job['completed'],self.job['failed'])

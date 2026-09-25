@@ -344,6 +344,19 @@ def review_ai(request: Request, payload: dict) -> dict:
     return legacy.start_ai_review(payload)
 
 
+@app.post("/api/review/delete")
+@app.post("/api/candidates/delete")
+def review_delete(request: Request, payload: dict):
+    user = current_user(request)
+    try:
+        return legacy.delete_review_job(payload, actor=user, enforce_ownership=auth.enabled)
+    except legacy.ReviewDeletionError as error:
+        return JSONResponse({"ok": False, "error": str(error), "deleted": error.deleted,
+                             "review_id": payload.get("review_id")}, status_code=error.status)
+    except Exception:
+        return JSONResponse({"ok": False, "error": "删除暂时失败，请稍后重试"}, status_code=503)
+
+
 @app.post("/api/review/confirm")
 def review_confirm(request: Request, payload: dict) -> dict:
     current_user(request)

@@ -80,3 +80,12 @@ class PlatformPersistence:
     def record_job(self, job_id: str, owner_user_id: str, kind: str, status: str, payload: dict) -> None:
         if self.enabled:
             self.database.record_job(job_id, owner_user_id, kind, status, payload)
+
+
+    def delete_review(self, review_id: str) -> None:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", str(review_id or "")):
+            raise ValueError("请提供有效的批改编号")
+        if self.enabled:
+            prefix = self._key("review", Path(review_id)) + "/"
+            self.cos.delete_prefix(prefix)
+            self.database.delete_review_artifacts(review_id, prefix)

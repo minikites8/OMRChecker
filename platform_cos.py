@@ -72,3 +72,27 @@ class TencentCosStorage:
             Key=object_key,
             Expired=expires,
         )
+
+
+    def delete_prefix(self, prefix: str) -> int:
+        """Remove current objects strictly inside one slash-terminated record prefix."""
+        if not prefix or not prefix.endswith("/"):
+            raise ValueError("COS 删除前缀需要明确的记录目录")
+        client = self._get_client()
+        marker = ""
+        deleted = 0
+        while True:
+            page = client.list_objects(Bucket=self.settings.cos_bucket, Prefix=prefix,
+                                       Marker=marker, MaxKeys=1000)
+            keys = [item["Key"] for item in (page.get("Contents") or [])]
+            if any(not key.startswith(prefix) for key in keys):
+                raise ValueError("COS 返回了记录目录之外的对象")
+            for key in keys:
+                client.delete_object(Bucket=self.settings.cos_bucket, Key=key)
+                deleted += 1
+            if str(page.get("IsTruncated", "false")).lower() != "true":
+                return deleted
+            next_marker = page.get("NextMarker", "")
+            if not next_marker or next_marker == marker:
+                raise RuntimeError("COS 对象列表分页标记异常")
+            marker = next_marker

@@ -26,6 +26,7 @@ from urllib.request import urlopen
 from sheet_designer import generate_sheet_package
 from ai_judge import ai_config, ai_is_configured
 from recognition_config import recognition_settings
+from review_deletion import ReviewDeletionError, delete_record, valid_review_id
 from exam_import import import_exam_and_answers
 from exam_review import apply_ai_review, apply_manual_review, attach_structured_scores, build_review_from_structured, refresh_rule_judgments, _import_variant_for_review as exam_review_variant_for_review
 from scan_templates import TemplateManager
@@ -409,18 +410,19 @@ def _create_review_report(import_id, normalized_path, imported, card_files,
             objective["bubble_url"] = "/reviews/{}/output/handwriting/objective/{}".format(
                 review_id, Path(image).name
             )
-    report_path = output_dir / "review.json"
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    if update_latest:
-        latest_path = REVIEW_ROOT / "latest.json"
-        latest_path.write_text(json.dumps({"review_id": review_id}, ensure_ascii=False) + "\n", encoding="utf-8")
-    if ai_is_configured():
-        return start_ai_review({"review_id": review_id})
-    report["ai_judgment"] = {"status": "未配置", "enabled": False, "processed": 0, "message": "AI接口等待配置"}
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    PLATFORM_PERSISTENCE.sync_tree(review_root, "review", owner_user_id)
-    report["report_url"] = "/reviews/{}/output/review.json".format(review_id)
-    return report
+    with AI_REVIEW_LOCK:
+        report_path = output_dir / "review.json"
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        if update_latest:
+            latest_path = REVIEW_ROOT / "latest.json"
+            latest_path.write_text(json.dumps({"review_id": review_id}, ensure_ascii=False) + "\n", encoding="utf-8")
+        if ai_is_configured():
+            return start_ai_review({"review_id": review_id})
+        report["ai_judgment"] = {"status": "未配置", "enabled": False, "processed": 0, "message": "AI接口等待配置"}
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        PLATFORM_PERSISTENCE.sync_tree(review_root, "review", owner_user_id, relative_prefix=Path(review_id))
+        report["report_url"] = "/reviews/{}/output/review.json".format(review_id)
+        return report
 
 
 def run_review_job(payload):
@@ -660,10 +662,14 @@ def read_batch_status(batch_id):
         with BATCH_REVIEW_LOCK:
             latest = json.loads(batch_path.read_text(encoding="utf-8"))
             for index, entry in refreshed_entries.items():
-                if index < len(latest.get("reviews", [])):
+                if (index < len(latest.get("reviews", []))
+                        and latest["reviews"][index].get("review_id") == entry.get("review_id")):
                     latest["reviews"][index] = entry
             _write_batch(batch_path, latest)
             batch = latest
+    # Refresh even when the earlier snapshot yielded no changed entries.
+    with BATCH_REVIEW_LOCK:
+        batch = json.loads(batch_path.read_text(encoding="utf-8"))
     batch["ai_processing"] = ai_running
     batch["phase"] = "AI处理中" if ai_running else batch.get("status", "")
     batch["batch_id"] = clean_id
@@ -730,6 +736,7 @@ def read_objective_view(review_id):
     destination = path.parent / "handwriting" / "objective_view"
     manifest_path = destination / "manifest.json"
     with OBJECTIVE_VIEW_LOCK:
+        _load_review(review_id)
         manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else None
         if not manifest or manifest.get("version") != VIEW_VERSION:
             input_dir = path.parent.parent / "input"
@@ -750,6 +757,35 @@ def read_objective_view(review_id):
             manifest = build_objective_view(normalized[0], destination, regions, PAGE_W, PAGE_H)
     return {"ok": True, "review_id": clean_id, **manifest,
             "asset_base": "/reviews/{}/output/handwriting/objective_view/".format(clean_id)}
+
+
+
+def delete_review_job(payload, actor=None, enforce_ownership=None):
+    identifier = valid_review_id(payload.get("review_id"))
+    if enforce_ownership is None:
+        enforce_ownership = AUTH_SERVICE.enabled
+
+    def is_busy(review, batch_ids):
+        future = AI_REVIEW_WORKERS.get(identifier)
+        if future and not future.done():
+            return True
+        if CANDIDATE_MANAGER.is_recognizing(identifier):
+            return True
+        for batch_id in set(batch_ids + [str(review.get("batch_id") or "")]):
+            worker = BATCH_REVIEW_WORKERS.get(batch_id)
+            if worker and worker.is_alive():
+                return True
+        return False
+
+    try:
+        with AI_REVIEW_LOCK, OBJECTIVE_VIEW_LOCK, BATCH_REVIEW_LOCK:
+            return delete_record(REVIEW_ROOT, identifier, actor=actor,
+                                 enforce_ownership=enforce_ownership,
+                                 is_busy=is_busy, persistence=PLATFORM_PERSISTENCE)
+    except ReviewDeletionError:
+        raise
+    except Exception as error:
+        raise ReviewDeletionError(503, "删除暂时失败，请稍后重试") from error
 
 
 def confirm_review_grade(payload):
@@ -1178,7 +1214,7 @@ class ScanUIHandler(BaseHTTPRequestHandler):
         if route.startswith("/api/admin/"):
             self._admin_request("POST")
             return
-        if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/exam/import", "/api/exam/delete", "/api/review", "/api/review/batch", "/api/review/ai-judge", "/api/review/confirm", "/api/review/confirm-grade", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
+        if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/exam/import", "/api/exam/delete", "/api/review", "/api/review/batch", "/api/review/ai-judge", "/api/review/confirm", "/api/review/confirm-grade", "/api/review/delete", "/api/candidates/delete", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
             self.send_json(404, {"ok": False, "error": "接口不存在"})
             return
         if route != "/api/auth/login" and not self._authorize(route):
@@ -1232,6 +1268,8 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                 result = save_manual_review(payload)
             elif route == "/api/review/confirm-grade":
                 result = confirm_review_grade(payload)
+            elif route in {"/api/review/delete", "/api/candidates/delete"}:
+                result = delete_review_job(payload, actor=current_user, enforce_ownership=AUTH_SERVICE.enabled)
             else:
                 result = run_scan_job(
                     files=payload.get("files", []), demo=route == "/api/demo",
@@ -1244,6 +1282,8 @@ class ScanUIHandler(BaseHTTPRequestHandler):
             self.send_json(401, {"ok": False, "error": str(error), "login_url": "/login"})
         except FileNotFoundError as error:
             self.send_json(404, {"ok": False, "error": str(error)})
+        except ReviewDeletionError as error:
+            self.send_json(error.status, {"ok": False, "error": str(error), "deleted": error.deleted, "review_id": payload.get("review_id")})
         except (ValueError, json.JSONDecodeError) as error:
             self.send_json(400, {"ok": False, "error": str(error)})
         except ScanFailure as error:
