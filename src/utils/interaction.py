@@ -6,13 +6,32 @@ from screeninfo import get_monitors
 from src.logger import logger
 from src.utils.image import ImageUtils
 
-monitor_window = get_monitors()[0]
+
+_DEFAULT_WINDOW_WIDTH = 1920
+_DEFAULT_WINDOW_HEIGHT = 1080
+
+
+def _detect_monitor():
+    """Return the first monitor when a desktop is available; support headless servers."""
+    try:
+        monitors = get_monitors()
+    except Exception as error:
+        logger.warning(f"未检测到图形显示器，使用无头默认窗口尺寸：{error}")
+        return None
+    if not monitors:
+        logger.warning("未检测到图形显示器，使用无头默认窗口尺寸")
+        return None
+    return monitors[0]
+
+
+monitor_window = _detect_monitor()
 
 
 @dataclass
 class ImageMetrics:
     # TODO: Move TEXT_SIZE, etc here and find a better class name
-    window_width, window_height = monitor_window.width, monitor_window.height
+    window_width = getattr(monitor_window, "width", _DEFAULT_WINDOW_WIDTH)
+    window_height = getattr(monitor_window, "height", _DEFAULT_WINDOW_HEIGHT)
     # for positioning image windows
     window_x, window_y = 0, 0
     reset_pos = [0, 0]
