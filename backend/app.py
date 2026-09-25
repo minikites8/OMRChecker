@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from urllib.parse import parse_qs
@@ -26,6 +27,9 @@ from platform_persistence import PlatformPersistence
 import scan_ui as legacy
 
 
+logger = logging.getLogger("omrchecker.api")
+
+
 settings = PlatformSettings.from_env()
 database = PostgresStore(settings.database_url)
 cos = TencentCosStorage(settings)
@@ -48,6 +52,42 @@ def current_user(request: Request) -> dict:
     if auth.enabled and not user:
         raise HTTPException(status_code=401, detail="需要登录")
     return user or {"id": "local", "sub": "local", "email": "local@localhost", "role": "admin"}
+
+
+def _review_error_response(request: Request, error: Exception) -> JSONResponse:
+    """将复核失败转换为前端可读的 JSON，避免默认 HTML 500。"""
+    if isinstance(error, ValueError):
+        status = 400
+        message = str(error)
+        extra = {}
+        logger.warning("复核请求校验失败 path=%s error=%s", request.url.path, message)
+    elif isinstance(error, FileNotFoundError):
+        status = 404
+        message = str(error)
+        extra = {}
+        logger.warning("复核输入文件不存在 path=%s error=%s", request.url.path, message)
+    elif isinstance(error, legacy.ScanFailure):
+        status = 502
+        message = str(error)
+        extra = {"log_tail": str(getattr(error, "log", ""))[-12000:]}
+        logger.error("复核扫描失败 path=%s error=%s", request.url.path, message)
+    else:
+        status = 503
+        message = "批改服务暂时失败，请稍后重试"
+        extra = {}
+        logger.exception("复核接口异常 path=%s", request.url.path)
+    return JSONResponse(
+        {"ok": False, "error": message, **extra},
+        status_code=status,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+def _review_response(request: Request, operation) -> JSONResponse:
+    try:
+        return JSONResponse(jsonable_encoder(operation()))
+    except Exception as error:
+        return _review_error_response(request, error)
 
 
 def public_user(user: dict | None) -> dict | None:
@@ -327,21 +367,21 @@ def exam_delete(request: Request, payload: dict) -> dict:
 
 
 @app.post("/api/review")
-def review(request: Request, payload: dict) -> dict:
+def review(request: Request, payload: dict) -> JSONResponse:
     user = current_user(request)
-    return legacy.run_review_job(actor_payload(payload, user))
+    return _review_response(request, lambda: legacy.run_review_job(actor_payload(payload, user)))
 
 
 @app.post("/api/review/batch")
-def review_batch(request: Request, payload: dict) -> dict:
+def review_batch(request: Request, payload: dict) -> JSONResponse:
     user = current_user(request)
-    return legacy.start_batch_review(actor_payload(payload, user))
+    return _review_response(request, lambda: legacy.start_batch_review(actor_payload(payload, user)))
 
 
 @app.post("/api/review/ai-judge")
-def review_ai(request: Request, payload: dict) -> dict:
+def review_ai(request: Request, payload: dict) -> JSONResponse:
     current_user(request)
-    return legacy.start_ai_review(payload)
+    return _review_response(request, lambda: legacy.start_ai_review(payload))
 
 
 @app.post("/api/review/delete")
