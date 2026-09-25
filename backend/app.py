@@ -369,7 +369,11 @@ def exam_delete(request: Request, payload: dict) -> dict:
 @app.post("/api/review")
 def review(request: Request, payload: dict) -> JSONResponse:
     user = current_user(request)
-    return _review_response(request, lambda: legacy.run_review_job(actor_payload(payload, user)))
+    response = _review_response(request, lambda: legacy.start_review_job(actor_payload(payload, user)))
+    if response.status_code == 200:
+        response.status_code = 202
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.post("/api/review/batch")

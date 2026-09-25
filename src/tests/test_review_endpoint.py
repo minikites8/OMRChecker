@@ -8,7 +8,7 @@ import backend.app as backend_app
 
 def _client(monkeypatch, operation):
     monkeypatch.setattr(backend_app, "current_user", lambda _request: {"id": "test-user", "sub": "test-user"})
-    monkeypatch.setattr(backend_app.legacy, "run_review_job", operation)
+    monkeypatch.setattr(backend_app.legacy, "start_review_job", operation)
     return TestClient(backend_app.app, raise_server_exceptions=False)
 
 
@@ -40,7 +40,7 @@ def test_review_endpoint_hides_unexpected_exception_and_logs(monkeypatch, caplog
 def test_review_endpoint_json_encodes_report_values(monkeypatch):
     client = _client(monkeypatch, lambda _payload: {"ok": True, "report_path": Path("review.json")})
     response = client.post("/api/review", json={"import_id": "demo", "card_files": []})
-    assert response.status_code == 200
+    assert response.status_code == 202
     assert response.json() == {"ok": True, "report_path": "review.json"}
 
 

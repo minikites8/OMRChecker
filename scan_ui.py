@@ -6,6 +6,7 @@ import binascii
 import csv
 import json
 import inspect
+import logging
 import mimetypes
 import os
 import re
@@ -438,6 +439,24 @@ def run_review_job(payload):
     )
 
 
+def start_review_job(payload):
+    """单份答题卡复用后台队列，HTTP 请求仅负责受理并返回进度编号。"""
+    files = payload.get("card_files") or []
+    if not isinstance(files, list) or not files:
+        raise ValueError("请选择答题卡照片或 PDF")
+    for index, item in enumerate(files, 1):
+        if not isinstance(item, dict):
+            raise ValueError("答题卡文件信息格式错误")
+        safe_filename(item.get("name"), index)
+        decode_upload(item)
+    queued_payload = dict(payload)
+    queued_payload["concurrency"] = 1
+    queued_payload["card_groups"] = [{"label": " / ".join(
+        str(item.get("name") or "答题卡") for item in files
+    )[:80], "files": files}]
+    return start_batch_review(queued_payload)
+
+
 def _normalize_card_groups(payload):
     explicit = payload.get("card_groups") or []
     groups = []
@@ -551,11 +570,15 @@ def _batch_review_worker(batch_id, import_id, normalized_path, imported, groups,
                 entry = _compact_review(report, groups[index]["label"])
                 results[index] = entry
             except Exception as error:
+                logging.getLogger("omrchecker.review").exception(
+                    "后台批改失败 batch_id=%s index=%s", batch_id, index
+                )
+                message = str(error) if isinstance(error, (ValueError, FileNotFoundError, ScanFailure)) else "批改服务暂时失败，请查看服务日志"
                 entry = {
                     "status": "失败",
                     "label": groups[index]["label"],
                     "review_id": "",
-                    "error": str(error),
+                    "error": message,
                 }
                 results[index] = entry
             with BATCH_REVIEW_LOCK:
@@ -582,11 +605,12 @@ def _batch_review_worker(batch_id, import_id, normalized_path, imported, groups,
                 encoding="utf-8",
             )
     except Exception as error:
+        logging.getLogger("omrchecker.review").exception("后台批改调度失败 batch_id=%s", batch_id)
         with BATCH_REVIEW_LOCK:
             try:
                 batch = json.loads(batch_path.read_text(encoding="utf-8"))
                 batch["status"] = "异常"
-                batch["message"] = "批量批改失败：{}".format(error)
+                batch["message"] = "后台批改调度失败，请查看服务日志"
                 batch["duration_seconds"] = round(time.perf_counter() - started, 2)
                 _write_batch(batch_path, batch)
             except (OSError, ValueError, json.JSONDecodeError):
@@ -1259,7 +1283,7 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                     "package_url": sheet_url(package["package_path"]),
                 }
             elif route == "/api/review":
-                result = run_review_job(payload)
+                result = start_review_job(payload)
             elif route == "/api/review/batch":
                 result = start_batch_review(payload)
             elif route == "/api/review/ai-judge":
