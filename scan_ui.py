@@ -40,6 +40,8 @@ from runtime_settings import get_setting
 from platform_cos import TencentCosStorage
 from platform_database import PostgresStore
 from platform_persistence import PlatformPersistence
+from review_collaboration import (SharedReviewLock, ReviewConflict, ReviewPreconditionRequired,
+    attach_collaboration, check_decisions, check_revision, question_revision, record_action)
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_ROOT = Path(get_setting("OMR_DATA_ROOT", str(PROJECT_ROOT))).expanduser().resolve()
@@ -63,7 +65,7 @@ ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf"}
 MAX_REQUEST_BYTES = int(get_setting("OMR_MAX_REQUEST_MB", "256")) * 1024 * 1024
 MAX_FILE_BYTES = int(get_setting("OMR_MAX_FILE_MB", "24")) * 1024 * 1024
 EXAM_IMPORT_LOCK = threading.RLock()
-AI_REVIEW_LOCK = threading.RLock()
+AI_REVIEW_LOCK = SharedReviewLock(lambda: REVIEW_ROOT / ".collaboration.lock")
 BATCH_REVIEW_LOCK = threading.RLock()
 AI_REVIEW_WORKERS = {}
 AI_QUESTION_WORKERS = {}
@@ -746,10 +748,11 @@ def _load_review(review_id):
     review = _read_json_file(review_path, "复核结果")
     if not isinstance(review, dict):
         raise ReviewDataUnavailable("复核结果格式无效，请重新提交批改")
-    return clean_id, review_path, review
+    return clean_id, review_path, attach_collaboration(review)
 
 
 def _write_review(path, review):
+    attach_collaboration(review)
     _write_json_atomic(path, review)
     try:
         relative = Path(path).resolve().relative_to(REVIEW_ROOT.resolve())
@@ -857,6 +860,7 @@ def delete_review_job(payload, actor=None, enforce_ownership=None):
 def confirm_review_grade(payload):
     with AI_REVIEW_LOCK:
         review_id, review_path, review = _load_review(payload.get("review_id"))
+        check_revision(payload, review)
         _ensure_review_scores(review)
         blockers = grade_confirmation_blockers(review)
         review["grade_blockers"] = blockers
@@ -868,6 +872,7 @@ def confirm_review_grade(payload):
         review["grade_confirmation_status"] = "已确认"
         review["grade_confirmed_at"] = datetime.now().isoformat(timespec="seconds")
         review["grade_blockers"] = []
+        record_action(review, payload, "grade.confirmed")
         _write_review(review_path, review)
     review["report_url"] = "/reviews/{}/output/review.json".format(review_id)
     return review
@@ -934,20 +939,30 @@ def export_confirmed_grades(selected_ids=None):
 def save_manual_review(payload):
     with AI_REVIEW_LOCK:
         review_id, review_path, review = _load_review(payload.get("review_id"))
+        check_decisions(payload, review)
+        if not payload.get("decisions") and not payload.get("objective_decisions"):
+            review["report_url"] = "/reviews/{}/output/review.json".format(review_id)
+            return review
         _ensure_review_scores(review)
         review = apply_manual_review(review, payload.get("decisions", []), payload.get("objective_decisions", []))
         review["grade_confirmed"] = False
         review["grade_confirmed_at"] = ""
         review["grade_confirmation_status"] = "待处理" if grade_confirmation_blockers(review) else "待确认"
         review["grade_blockers"] = grade_confirmation_blockers(review)
+        review["grade_confirmed_by"] = None
+        review["review_summary"] = _review_summary(review.get("items", []))
+        record_action(review, payload, "review.saved")
         _write_review(review_path, review)
     review["report_url"] = "/reviews/{}/output/review.json".format(review_id)
     return review
 
 
 def run_ai_review(payload):
-    review_id, review_path, review = _load_review(payload.get("review_id"))
-    _ensure_review_scores(review)
+    with AI_REVIEW_LOCK:
+        review_id, review_path, review = _load_review(payload.get("review_id"))
+        if _ensure_review_scores(review):
+            _write_review(review_path, review)
+    base_versions = {str(item["question"]): question_revision(item) for item in review.get("items", [])}
     for item in review.get("items", []):
         item["handwriting_images"] = [
             str((review_path.parent / "handwriting" / Path(urlparse(url).path).name).resolve())
@@ -982,11 +997,12 @@ def run_ai_review(payload):
         ai_fields = ("ai_status", "ai_confidence", "ai_visual_text", "ai_reason", "ai_corrected_answer", "ai_review_policy", "ai_visual_evidence", "expected_answer", "final_status", "score_basis", "awarded_score")
         for item in latest.get("items", []):
             source = by_question.get(str(item.get("question")), {})
-            item.update({field: source[field] for field in ai_fields if field in source})
+            if question_revision(item) == base_versions.get(str(item.get("question"))):
+                item.update({field: source[field] for field in ai_fields if field in source})
         latest["ai_judgment"] = updated["ai_judgment"]
-        latest["review_summary"] = updated["review_summary"]
-        if "score_summary" in updated:
-            latest["score_summary"] = updated["score_summary"]
+        latest["review_summary"] = _review_summary(latest.get("items", []))
+        latest["score_summary"] = _score_summary(latest)
+        _set_review_unconfirmed(latest)
         _write_review(review_path, latest)
     latest["report_url"] = "/reviews/{}/output/review.json".format(review_id)
     return latest
@@ -1004,6 +1020,7 @@ def _ai_question_key(review_id, question):
 
 
 def _set_review_unconfirmed(review):
+    review["grade_confirmed_by"] = None
     review["grade_confirmed"] = False
     review["grade_confirmed_at"] = ""
     blockers = grade_confirmation_blockers(review)
@@ -1012,8 +1029,10 @@ def _set_review_unconfirmed(review):
 
 
 def run_ai_question_review(payload):
-    review_id, review_path, review = _load_review(payload.get("review_id"))
-    _ensure_review_scores(review)
+    with AI_REVIEW_LOCK:
+        review_id, review_path, review = _load_review(payload.get("review_id"))
+        if _ensure_review_scores(review):
+            _write_review(review_path, review)
     question = str(payload.get("question") or "").strip()
     target = next(
         (item for item in review.get("items", []) if str(item.get("question", "")).strip() == question),
@@ -1021,6 +1040,7 @@ def run_ai_question_review(payload):
     )
     if target is None:
         raise ValueError("题目{}不存在".format(question or "编号为空"))
+    base_version = question_revision(target)
     target["handwriting_images"] = [
         str((review_path.parent / "handwriting" / Path(urlparse(url).path).name).resolve())
         for url in target.get("handwriting_urls", [])
@@ -1031,7 +1051,7 @@ def run_ai_question_review(payload):
         by_question = {str(item.get("question")): item for item in updated.get("items", [])}
         source = by_question.get(question, {})
         for item in latest.get("items", []):
-            if str(item.get("question")) == question:
+            if str(item.get("question")) == question and question_revision(item) == base_version:
                 item.update({field: source[field] for field in AI_SINGLE_FIELDS if field in source})
                 break
         latest["ai_question_judgment"] = updated.get("ai_question_judgment", {})
@@ -1439,7 +1459,9 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                 self.send_json(200, {"ok": True, "user": self._public_user(user)}, {"Set-Cookie": AUTH_SERVICE.session_cookie(user)})
                 return
             current_user = self._current_user() or {}
-            payload["_actor_user_id"] = current_user.get("sub") or current_user.get("id") or ""
+            payload["_actor_user_id"] = current_user.get("id") or current_user.get("sub") or ""
+            payload["_actor_display_name"] = current_user.get("display_name") or current_user.get("email") or "本地用户"
+            payload["_require_revision"] = AUTH_SERVICE.enabled
             if route == "/api/templates/create":
                 result = TEMPLATE_MANAGER.create(payload)
             elif route == "/api/templates/update":
@@ -1493,6 +1515,8 @@ class ScanUIHandler(BaseHTTPRequestHandler):
             self.send_json(401, {"ok": False, "error": str(error), "login_url": "/login"})
         except FileNotFoundError as error:
             self.send_json(404, {"ok": False, "error": str(error)})
+        except (ReviewConflict, ReviewPreconditionRequired) as error:
+            self.send_json(error.status, error.response())
         except ReviewDeletionError as error:
             self.send_json(error.status, {"ok": False, "error": str(error), "deleted": error.deleted, "review_id": payload.get("review_id")})
         except (ValueError, json.JSONDecodeError) as error:

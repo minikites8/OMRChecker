@@ -101,7 +101,15 @@ def test_review_endpoint_saves_manual_decisions(tmp_path, monkeypatch):
         with urlopen(request, timeout=10) as response:
             created = json.loads(response.read().decode("utf-8"))
         assert response.status == 200
-        review_id = created["review_id"]
+        batch_id = created["batch_id"]
+        worker = scan_ui.BATCH_REVIEW_WORKERS.get(batch_id)
+        if worker:
+            worker.join(timeout=10)
+            assert not worker.is_alive()
+        batch = scan_ui.read_batch_status(batch_id)
+        assert batch["completed"] == 1
+        review_id = batch["reviews"][0]["review_id"]
+        created = scan_ui.read_review_status(review_id)
         assert created["import_id"] == imported["import_id"]
         latest = json.loads((tmp_path / "reviews" / "latest.json").read_text(encoding="utf-8"))
         assert latest["review_id"] == review_id
@@ -150,7 +158,7 @@ def test_review_ui_is_connected():
     assert "保存复核结果" in html
     assert "客观题复核" in html
     assert 'id="reviewObjectiveSummary"' in html
-    assert "objective_decisions" in javascript
+    assert "objective_decisions" in scan_ui.UI_ROOT.joinpath("collaboration.js").read_text(encoding="utf-8")
     assert "修正识别" in javascript
     assert "objective-scan-overlay" in javascript
     assert "扫描识别：" in javascript

@@ -56,6 +56,8 @@ def current_user(request: Request) -> dict:
 
 def _review_error_response(request: Request, error: Exception) -> JSONResponse:
     """将复核失败转换为前端可读的 JSON，避免默认 HTML 500。"""
+    if isinstance(error, (legacy.ReviewConflict, legacy.ReviewPreconditionRequired)):
+        return JSONResponse(error.response(), status_code=error.status, headers={"Cache-Control": "no-store"})
     if isinstance(error, ValueError):
         status = 400
         message = str(error)
@@ -110,6 +112,8 @@ def public_user(user: dict | None) -> dict | None:
 def actor_payload(payload: dict, user: dict) -> dict:
     enriched = dict(payload or {})
     enriched["_actor_user_id"] = str(user.get("id") or user.get("sub") or "")
+    enriched["_actor_display_name"] = str(user.get("display_name") or user.get("email") or "本地用户")
+    enriched["_require_revision"] = True
     return enriched
 
 
@@ -417,15 +421,15 @@ def review_delete(request: Request, payload: dict):
 
 
 @app.post("/api/review/confirm")
-def review_confirm(request: Request, payload: dict) -> dict:
-    current_user(request)
-    return legacy.save_manual_review(payload)
+def review_confirm(request: Request, payload: dict) -> JSONResponse:
+    user = current_user(request)
+    return _review_response(request, lambda: legacy.save_manual_review(actor_payload(payload, user)))
 
 
 @app.post("/api/review/confirm-grade")
-def review_confirm_grade(request: Request, payload: dict) -> dict:
-    current_user(request)
-    return legacy.confirm_review_grade(payload)
+def review_confirm_grade(request: Request, payload: dict) -> JSONResponse:
+    user = current_user(request)
+    return _review_response(request, lambda: legacy.confirm_review_grade(actor_payload(payload, user)))
 
 
 @app.post("/api/candidates/save")

@@ -17,7 +17,9 @@ def test_existing_controls_and_save_payload_are_preserved():
     app=(ROOT/'ui/app.js').read_text(encoding='utf-8')
     assert 'window.subjectiveView.render(reviewState.items,reviewState.reviewId)' in app
     assert "'题复核状态'" in app and "'题人工修正答案'" in app
-    assert 'status:item.manual_status,text:item.manual_text' in app
+    collaboration=(ROOT/'ui/collaboration.js').read_text(encoding='utf-8')
+    assert 'status: item.manual_status' in collaboration and 'text: item.manual_text' in collaboration
+    assert 'workspaceReview.pending(reviewState, forConfirmation)' in app
     assert "select.addEventListener('change',function(){item.manual_status=select.value;updateTextScoreBadge();renderScoreBoard()})" in app
 
 
