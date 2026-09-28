@@ -6,10 +6,14 @@
     const a = normalize(answer), b = normalize(expected);
     return a !== '' && b !== '' && [...new Set(a)].sort().join('') === [...new Set(b)].sort().join('');
   }
-  function visualVerdict(item) {
-    if (item.manual_status === '通过') return 'correct';
-    if (item.manual_status === '不通过') return 'wrong';
-    if (item.manual_status === '待复核') return 'pending';
+  function visualVerdict(item, status) {
+    // Navigation follows the effective review status used by scoring/filtering.
+    const localStatus = status === undefined
+      ? item.manual_status || (!item.override_answer && item.auto_status)
+      : status;
+    if (localStatus === '自动通过' || localStatus === '通过') return 'correct';
+    if (localStatus === '不通过') return 'wrong';
+    if (localStatus) return 'pending';
     if (item.recognition_warning && !item.override_answer) return 'pending';
     if (!normalize(item.expected)) return 'pending';
     const answer = item.override_answer ? item.reviewed_answer : item.recognized;
@@ -19,7 +23,7 @@
   const core = { normalize, answerMatches, visualVerdict, relativePoints };
   if (typeof module === 'object' && module.exports) { module.exports = core; return; }
   const $ = id => document.getElementById(id);
-  const labels = { correct: '正确', wrong: '错误', pending: '待确认' };
+  const labels = { correct: '正确', wrong: '错误', pending: '待复核' };
   const state = { id: '', items: [], selected: '', manifest: null, mode: 'focus', filter: 'all', controller: null, cache: new Map(), sequence: 0, loadingId: '' };
   function node(tag, className, text) {
     const element = document.createElement(tag);
@@ -35,7 +39,7 @@
   function setup() {
     if ($('objectiveWorkspace')) return;
     const workspace = node('div', 'objective-workspace'); workspace.id = 'objectiveWorkspace';
-    workspace.innerHTML = '<div class="objective-document"><div class="objective-toolbar"><div><strong>答题卡扫描件</strong><span>页面校正后原图</span></div><div class="objective-view-tools"><label><input type="checkbox" id="objectiveShowOverlay" checked>识别叠加</label><label class="visually-hidden" for="objectiveViewMode">查看范围</label><select id="objectiveViewMode"><option value="focus">客观题区域</option><option value="page">整张答题卡</option></select><label class="visually-hidden" for="objectiveZoom">图像缩放</label><select id="objectiveZoom"><option value="100">适应宽度</option><option value="150">放大 150%</option><option value="200">放大 200%</option></select></div></div><div class="objective-viewport" id="objectiveViewport"><div class="objective-loading" id="objectiveLoading" role="status">正在加载答题卡原图…</div><div class="objective-image-stage" id="objectiveImageStage" hidden><img id="objectivePageImage" alt="本份答题卡扫描原图"><svg id="objectiveSvg" xmlns="http://www.w3.org/2000/svg" aria-label="题目识别叠加层"></svg></div><button class="button button-secondary" id="objectiveRetry" hidden>重新加载扫描件</button></div><div class="objective-document-footer"><span id="objectiveSelectedCaption" aria-live="polite"></span><span>点击题号或扫描区域查看</span></div></div><aside class="objective-sidebar" aria-label="题目导航与复核"><div class="objective-nav-heading"><strong>题目导航</strong><span id="objectiveQuestionCount"></span></div><div class="objective-legend"><span class="correct">正确 <b id="objectiveCorrectCount">0</b></span><span class="wrong">错误 <b id="objectiveWrongCount">0</b></span><span class="pending">待确认 <b id="objectiveUncertainCount">0</b></span></div><div class="objective-question-grid" id="objectiveQuestionGrid" role="group" aria-label="客观题题号"></div><div class="objective-active-heading"><strong id="objectiveActiveHeading">选中题目</strong><span id="objectiveActiveVerdict"></span></div><div id="objectiveDetailSlot"></div></aside>';
+    workspace.innerHTML = '<div class="objective-document"><div class="objective-toolbar"><div><strong>答题卡扫描件</strong><span>页面校正后原图</span></div><div class="objective-view-tools"><label><input type="checkbox" id="objectiveShowOverlay" checked>识别叠加</label><label class="visually-hidden" for="objectiveViewMode">查看范围</label><select id="objectiveViewMode"><option value="focus">客观题区域</option><option value="page">整张答题卡</option></select><label class="visually-hidden" for="objectiveZoom">图像缩放</label><select id="objectiveZoom"><option value="100">适应宽度</option><option value="150">放大 150%</option><option value="200">放大 200%</option></select></div></div><div class="objective-viewport" id="objectiveViewport"><div class="objective-loading" id="objectiveLoading" role="status">正在加载答题卡原图…</div><div class="objective-image-stage" id="objectiveImageStage" hidden><img id="objectivePageImage" alt="本份答题卡扫描原图"><svg id="objectiveSvg" xmlns="http://www.w3.org/2000/svg" aria-label="题目识别叠加层"></svg></div><button class="button button-secondary" id="objectiveRetry" hidden>重新加载扫描件</button></div><div class="objective-document-footer"><span id="objectiveSelectedCaption" aria-live="polite"></span><span>点击题号或扫描区域查看</span></div></div><aside class="objective-sidebar" aria-label="题目导航与复核"><div class="objective-nav-heading"><strong>题目导航</strong><span id="objectiveQuestionCount"></span></div><div class="objective-legend"><span class="correct">正确 <b id="objectiveCorrectCount">0</b></span><span class="wrong">错误 <b id="objectiveWrongCount">0</b></span><span class="pending">待复核 <b id="objectiveUncertainCount">0</b></span></div><div class="objective-question-grid" id="objectiveQuestionGrid" role="group" aria-label="客观题题号"></div><div class="objective-active-heading"><strong id="objectiveActiveHeading">选中题目</strong><span id="objectiveActiveVerdict"></span></div><div id="objectiveDetailSlot"></div></aside>';
     $('reviewObjective').before(workspace);
     $('objectiveDetailSlot').append($('reviewObjective'));
     $('objectiveShowOverlay').addEventListener('change', () => $('objectiveSvg').classList.toggle('overlay-off', !$('objectiveShowOverlay').checked));
@@ -67,8 +71,8 @@
     });
     const item = selectedItem();
     $('objectiveActiveHeading').textContent = item ? '第 ' + item.question + ' 题' : '选中题目';
-    $('objectiveActiveVerdict').textContent = item ? labels[visualVerdict(item)] : '';
-    $('objectiveActiveVerdict').className = item ? visualVerdict(item) : '';
+    $('objectiveActiveVerdict').textContent = item ? labels[visualVerdict(item, objectiveLocalStatus(item))] : '';
+    $('objectiveActiveVerdict').className = item ? visualVerdict(item, objectiveLocalStatus(item)) : '';
     $('objectiveSelectedCaption').textContent = item ? '第 ' + item.question + ' 题 · 识别 ' + objectiveRecognitionLabel(item) + ' · 参考 ' + (item.expected || '待补') : '';
   }
   function focusRegion() {
@@ -125,12 +129,12 @@
     const byId = new Map(state.items.map(item => [String(item.question), item]));
     $('objectiveQuestionGrid').querySelectorAll('button').forEach(button => {
       const item = byId.get(button.dataset.question); if (!item) return;
-      const verdict = visualVerdict(item); counts[verdict]++;
+      const verdict = visualVerdict(item, objectiveLocalStatus(item)); counts[verdict]++;
       button.className = 'objective-question-button ' + verdict;
       button.querySelector('.question-verdict').textContent = verdict === 'correct' ? '✓' : verdict === 'wrong' ? '×' : '?';
       button.setAttribute('aria-label', '第' + item.question + '题，' + labels[verdict] + '，识别' + objectiveRecognitionLabel(item) + '，参考' + (item.expected || '待补'));
     });
-    $('objectiveSvg').querySelectorAll('[data-question]').forEach(group => { const item = byId.get(group.dataset.question); if (item) group.setAttribute('class', 'objective-region ' + visualVerdict(item)); });
+    $('objectiveSvg').querySelectorAll('[data-question]').forEach(group => { const item = byId.get(group.dataset.question); if (item) group.setAttribute('class', 'objective-region ' + visualVerdict(item, objectiveLocalStatus(item))); });
     $('objectiveCorrectCount').textContent = counts.correct; $('objectiveWrongCount').textContent = counts.wrong; $('objectiveUncertainCount').textContent = counts.pending;
     syncSelection();
   }

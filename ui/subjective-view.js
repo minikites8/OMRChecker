@@ -4,6 +4,7 @@
   function verdictForStatus(status) {
     if (['自动通过','通过','AI通过'].includes(status)) return 'correct';
     if (['不通过','AI不通过'].includes(status)) return 'wrong';
+    if (['部分得分','AI部分得分'].includes(status)) return 'partial';
     return 'pending';
   }
   function sectionFor(item) {
@@ -39,8 +40,8 @@
   if (typeof module === 'object' && module.exports) { module.exports = core; return; }
   const $ = id => document.getElementById(id);
   const state = { id: '', items: [], selected: '', filter: 'all', zoom: '100' };
-  const labels = { correct: '通过', wrong: '错误', pending: '待复核' };
-  const symbols = { correct: '✓', wrong: '×', pending: '?' };
+  const labels = { correct: '满分', wrong: '零分', partial: '部分得分', pending: '待复核' };
+  const symbols = { correct: '✓', wrong: '×', partial: '◐', pending: '?' };
   // The navigation follows the same live rule as the score board, including AI-approved answers.
   const statusOf = item => textLocalStatus(item);
   const available = () => visibleItems(state.items, state.filter, statusOf);
@@ -53,7 +54,7 @@
   function setup() {
     if ($('subjectiveWorkspace')) return;
     const workspace = node('div', 'subjective-workspace'); workspace.id = 'subjectiveWorkspace';
-    workspace.innerHTML = '<section class="subjective-document" aria-label="主观题作答与复核"><div class="subjective-toolbar"><div><strong id="subjectiveCurrentTitle">主观题复核</strong><span id="subjectiveCurrentGroup"></span></div><div class="subjective-tools"><label class="visually-hidden" for="subjectiveZoom">主观题扫描缩放</label><select id="subjectiveZoom"><option value="100">适应宽度</option><option value="150">放大 150%</option><option value="200">放大 200%</option></select><button class="subjective-step" id="subjectivePrevious" type="button" aria-label="上一道主观题">上一题</button><button class="subjective-step" id="subjectiveNext" type="button" aria-label="下一道主观题">下一题</button></div></div><div id="subjectiveDetailSlot"></div><p class="subjective-empty" id="subjectiveEmpty" hidden>当前筛选下的主观题已完成复核。</p></section><aside class="subjective-sidebar" aria-label="主观题导航"><div class="subjective-nav-heading"><strong>主观题导航</strong><span id="subjectiveQuestionCount"></span></div><div class="subjective-legend"><span class="correct">通过 <b id="subjectiveCorrectCount">0</b></span><span class="wrong">错误 <b id="subjectiveWrongCount">0</b></span><span class="pending">待复核 <b id="subjectivePendingCount">0</b></span></div><div class="subjective-navigation" id="subjectiveNavigation"></div><div class="subjective-selection-summary"><strong id="subjectiveActiveQuestion"></strong><span id="subjectiveActiveVerdict"></span><span id="subjectiveActiveScore"></span></div><button class="subjective-pending-button" id="subjectiveNextPending" type="button">下一道待复核</button><p class="subjective-nav-status" id="subjectiveNavStatus" role="status" aria-live="polite"></p></aside>';
+    workspace.innerHTML = '<section class="subjective-document" aria-label="主观题作答与复核"><div class="subjective-toolbar"><div><strong id="subjectiveCurrentTitle">主观题复核</strong><span id="subjectiveCurrentGroup"></span></div><div class="subjective-tools"><label class="visually-hidden" for="subjectiveZoom">主观题扫描缩放</label><select id="subjectiveZoom"><option value="100">适应宽度</option><option value="150">放大 150%</option><option value="200">放大 200%</option></select><button class="subjective-step" id="subjectivePrevious" type="button" aria-label="上一道主观题">上一题</button><button class="subjective-step" id="subjectiveNext" type="button" aria-label="下一道主观题">下一题</button></div></div><div id="subjectiveDetailSlot"></div><p class="subjective-empty" id="subjectiveEmpty" hidden>当前筛选下的主观题已完成复核。</p></section><aside class="subjective-sidebar" aria-label="主观题导航"><div class="subjective-nav-heading"><strong>主观题导航</strong><span id="subjectiveQuestionCount"></span></div><div class="subjective-legend"><span class="correct">满分 <b id="subjectiveCorrectCount">0</b></span><span class="partial">部分分 <b id="subjectivePartialCount">0</b></span><span class="wrong">零分 <b id="subjectiveWrongCount">0</b></span><span class="pending">待复核 <b id="subjectivePendingCount">0</b></span></div><div class="subjective-navigation" id="subjectiveNavigation"></div><div class="subjective-selection-summary"><strong id="subjectiveActiveQuestion"></strong><span id="subjectiveActiveVerdict"></span><span id="subjectiveActiveScore"></span></div><button class="subjective-pending-button" id="subjectiveNextPending" type="button">下一道待复核</button><p class="subjective-nav-status" id="subjectiveNavStatus" role="status" aria-live="polite"></p></aside>';
     $('reviewItems').before(workspace);
     $('subjectiveDetailSlot').append($('reviewItems'));
     $('subjectiveZoom').addEventListener('change', () => {
@@ -85,6 +86,9 @@
       if (!images.children.length) {
         panel.append(node('p', 'subjective-scan-missing', '本题尚无作答扫描图，可结合题干、识别文字和原答题卡复核。'));
       }
+      // Keep the original transcript and confidence beside its scan, outside zoom.
+      const recognized = card.querySelector('.subjective-recognized');
+      if (recognized) panel.append(recognized);
       images.querySelectorAll('img').forEach((image, imageIndex) => {
         const figure = node('figure', 'subjective-scan-figure');
         const caption = node('figcaption', '', images.querySelectorAll('img').length > 1 ? '作答区域 ' + (imageIndex + 1) : '第 ' + item.question + ' 题作答');
@@ -152,7 +156,7 @@
     $('subjectiveActiveVerdict').textContent = item ? labels[verdict] : '';
     $('subjectiveActiveVerdict').className = verdict;
     const score = Number(item?.score) || 0;
-    $('subjectiveActiveScore').textContent = item ? (verdict === 'pending' ? '待定 ' + score + ' 分' : '得分 ' + (verdict === 'correct' ? score : 0) + ' / ' + score) : '';
+    $('subjectiveActiveScore').textContent = item ? (verdict === 'pending' ? '待定 ' + score + ' 分' : '得分 ' + textLocalScore(item) + ' / ' + score) : '';
     const index = items.findIndex(item => String(item.question) === state.selected);
     $('subjectivePrevious').disabled = index <= 0; $('subjectiveNext').disabled = index < 0 || index === items.length - 1;
     $('subjectiveNextPending').disabled = !items.some(item => verdictForStatus(statusOf(item)) === 'pending');
@@ -178,7 +182,7 @@
   }
   function update() {
     if (!$('subjectiveWorkspace')) return;
-    const counts = {correct:0,wrong:0,pending:0};
+    const counts = {correct:0,wrong:0,partial:0,pending:0};
     const byQuestion = new Map(state.items.map(item => [String(item.question), item]));
     $('subjectiveNavigation').querySelectorAll('button').forEach(button => {
       const item = byQuestion.get(button.dataset.question); if (!item) return;
@@ -187,7 +191,7 @@
       button.querySelector('.subjective-question-verdict').textContent = symbols[verdict];
       button.setAttribute('aria-label','第' + item.question + '题，' + labels[verdict]);
     });
-    $('subjectiveCorrectCount').textContent = counts.correct; $('subjectiveWrongCount').textContent = counts.wrong; $('subjectivePendingCount').textContent = counts.pending;
+    $('subjectivePartialCount').textContent = counts.partial; $('subjectiveCorrectCount').textContent = counts.correct; $('subjectiveWrongCount').textContent = counts.wrong; $('subjectivePendingCount').textContent = counts.pending;
     syncSelection();
   }
   function render(items, reviewId) {

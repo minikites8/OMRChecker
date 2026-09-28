@@ -9,6 +9,16 @@
         [record.student_name,record.student_id,record.review_id,record.label].some(value=>String(value||'').toLocaleLowerCase().includes(search));
     });
   }
+  function sortCandidates(records,order='default') {
+    if(!['score_desc','score_asc'].includes(order))return records.slice();
+    return records.map((record,index)=>({record,index,score:hasExportableScore(record)?Number(record.score_summary.total_score):null}))
+      .sort((left,right)=>{
+        if(left.score===null&&right.score===null)return left.index-right.index;
+        if(left.score===null)return 1;
+        if(right.score===null)return -1;
+        return (order==='score_desc'?right.score-left.score:left.score-right.score)||left.index-right.index;
+      }).map(item=>item.record);
+  }
   function candidatePage(records,page,size=8) {
     const pages=Math.max(1,Math.ceil(records.length/size));
     page=Math.max(1,Math.min(pages,Number(page)||1));
@@ -25,7 +35,7 @@
     const numeric=value=>(typeof value==='number'||typeof value==='string'&&value.trim()!=='')&&Number.isFinite(Number(value));
     return numeric(summary.total_score)&&numeric(summary.possible_score)&&Number(summary.possible_score)>0;
   }
-  if(typeof module==='object'&&module.exports){module.exports={filterCandidates,candidatePage,validateIdentity,hasExportableScore};return;}
+  if(typeof module==='object'&&module.exports){module.exports={filterCandidates,sortCandidates,candidatePage,validateIdentity,hasExportableScore};return;}
   const $=id=>document.getElementById(id);
   const state={records:[],selected:'',selectedIds:new Set(),page:1,dirty:false,saving:false,exporting:false,loading:false,job:null,timer:null,sequence:0};
   const selected=()=>state.records.find(r=>r.review_id===state.selected);
@@ -33,7 +43,7 @@
   function node(tag,className,text){const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined)el.textContent=text;return el;}
   function message(text){$('candidateMessage').textContent=text;}
   function gradeStatus(record){if(record.grade_confirmed)return {label:'成绩已确认',className:'success'};if((record.grade_blockers||[]).length)return {label:'待复核',className:'warning'};return {label:'待确认',className:'warning'};}
-  function filteredRecords(){return filterCandidates(state.records,candidateSearch.value,candidateFilter.value);}
+  function filteredRecords(){return sortCandidates(filterCandidates(state.records,candidateSearch.value,candidateFilter.value),$('candidateSort').value);}
   async function request(url,payload){
     const response=await fetch(url,payload===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(response.status===404)throw new Error('姓名识别接口待加载，请在原运行终端重启项目。');
@@ -64,7 +74,7 @@
     if(record.name_image_url)image.src=record.name_image_url;else image.removeAttribute('src');
     $('candidateNameHint').hidden=!!record.name_image_url;
     const confidence=record.student_name_confidence?(' · 置信度 '+(record.student_name_confidence*100).toFixed(2)+'%'):'';
-    $('candidateOcrText').textContent=record.name_ocr_error?'姓名识别异常，可对照原图填写。':record.name_ocr?'识别结果：'+record.name_ocr+confidence:record.name_recognition_version?'姓名待填写或确认':'等待识别姓名';
+    $('candidateOcrText').textContent=record.name_ocr_error?'姓名识别异常，可对照原图填写。':record.name_ocr?(record.student_name_source==='ai'?'AI 识别结果：':'识别结果：')+record.name_ocr+confidence:record.name_recognition_version?'姓名待填写或确认':'导入时自动 AI 识别姓名';
     $('candidateSaveStatus').textContent=record.student_name_status==='已确认'?'姓名已人工确认':'';
   }
   function selectRecord(record){
@@ -73,6 +83,7 @@
     state.selected=record.review_id;state.dirty=false;localStorage.setItem('omrCandidateReviewId',state.selected);draw();drawDetails(true);
   }
   function draw(){
+    $('candidateScoreHeader').setAttribute('aria-sort',({score_desc:'descending',score_asc:'ascending'})[$('candidateSort').value]||'none');
     $('candidateTotal').textContent=state.records.length;
     $('candidateRecognized').textContent=state.records.filter(r=>r.student_name).length;
     $('candidateConfirmed').textContent=state.records.filter(r=>r.student_name_status==='已确认').length;
@@ -88,15 +99,29 @@
     $('candidatePrevious').disabled=page.page===1;$('candidateNext').disabled=page.page===page.pages;$('candidatePage').textContent=page.page+' / '+page.pages+' · '+filtered.length+' 份';
     const body=$('candidateRows');body.replaceChildren();
     page.items.forEach(record=>{
-      const row=node('tr',record.review_id===state.selected?'candidate-selected':'');
+      const row=node('tr','candidate-selectable'+(record.review_id===state.selected?' candidate-selected':''));
+      row.tabIndex=0;
+      row.setAttribute('data-review-id',record.review_id);
+      row.setAttribute('aria-label','查看考生 '+(record.student_name||'姓名待识别')+' '+(record.student_id||record.review_id));
+      row.setAttribute('aria-controls','candidateForm');
+      if(record.review_id===state.selected)row.setAttribute('aria-current','true');
+      row.addEventListener('click',event=>{
+        if(event.defaultPrevented||event.target.closest('button,a,input,select,textarea,label,.candidate-select-cell'))return;
+        selectRecord(record);
+      });
+      row.addEventListener('keydown',event=>{
+        if(event.target!==row||!['Enter',' '].includes(event.key))return;
+        event.preventDefault();selectRecord(record);
+        Array.from(body.children).find(item=>item.getAttribute('data-review-id')===record.review_id)?.focus();
+      });
       const selectCell=node('td','candidate-select-cell'),checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=state.selectedIds.has(record.review_id);checkbox.disabled=!hasExportableScore(record);checkbox.title=checkbox.disabled?'成绩生成后可选择导出':'导出当前成绩及确认状态';checkbox.setAttribute('aria-label','选择 '+(record.student_name||record.student_id||record.review_id));checkbox.addEventListener('change',()=>{if(checkbox.checked)state.selectedIds.add(record.review_id);else state.selectedIds.delete(record.review_id);draw();});selectCell.append(checkbox);
-      const identity=node('td'),name=node('button','candidate-name',record.student_name||'姓名待识别');name.type='button';name.setAttribute('aria-label','管理考生 '+(record.student_name||'姓名待识别')+' '+(record.student_id||record.review_id));name.addEventListener('click',()=>selectRecord(record));
+      const identity=node('td'),name=node('button','candidate-name',record.student_name||'姓名待识别');name.type='button';name.setAttribute('aria-label','查看考生 '+(record.student_name||'姓名待识别')+' '+(record.student_id||record.review_id));name.addEventListener('click',()=>selectRecord(record));
       if(record.review_id===state.selected)name.setAttribute('aria-current','true');
       identity.append(name,node('small','table-subtitle',record.student_id||'学号待确认'),node('small','table-id',record.review_id));
       const score=node('td'),summary=record.score_summary||{};
       score.append(node('strong','numeric',Number(summary.possible_score)>0?number(summary.total_score)+' / '+number(summary.possible_score):'待出分'),node('small','table-subtitle',record.paper_type?record.paper_type+' 卷':'卷型待确认'));
       const status=node('td'),grade=gradeStatus(record);status.append(node('span','status-pill '+(record.student_name_status==='已确认'?'success':'warning'),record.student_name_status||'待识别'),node('span','status-pill '+grade.className,grade.label));
-      const actions=node('td'),button=node('button','text-link','管理');button.type='button';button.setAttribute('aria-label','管理答卷 '+record.review_id);button.addEventListener('click',()=>selectRecord(record));actions.append(button);
+      const actions=node('td');
       const remove=node('button','text-link review-delete-button','删除');remove.type='button';remove.setAttribute('aria-label','删除答卷及考生信息 '+record.review_id);remove.addEventListener('click',()=>window.reviewDeletion.remove(record,remove));actions.append(remove);
       row.append(selectCell,identity,score,status,actions);body.append(row);
     });
@@ -119,7 +144,7 @@
     finally{if(sequence===state.sequence){state.loading=false;$('candidateRefresh').disabled=false;$('candidateRecognizeAll').disabled=state.job?.status==='处理中';}}
   }
   async function recognize(ids){
-    $('candidateRecognizeAll').disabled=true;$('candidateRecognize').disabled=true;message('正在启动姓名识别…');
+    $('candidateRecognizeAll').disabled=true;$('candidateRecognize').disabled=true;message('正在重新 AI 识别姓名…');
     try{const result=await request('/api/candidates/recognize',ids?{review_ids:ids}:{});drawJob(result.name_job);message('');await refresh(false);}
     catch(error){message(error.message);$('candidateRecognizeAll').disabled=false;$('candidateRecognize').disabled=false;}
   }
@@ -135,6 +160,7 @@
   });
   $('candidateSearch').addEventListener('input',()=>{state.page=1;draw();});
   $('candidateFilter').addEventListener('change',()=>{state.page=1;draw();});
+  $('candidateSort').addEventListener('change',()=>{state.page=1;draw();});
   $('candidatePrevious').addEventListener('click',()=>{state.page--;draw();});
   $('candidateNext').addEventListener('click',()=>{state.page++;draw();});
   $('candidateRefresh').addEventListener('click',()=>refresh());

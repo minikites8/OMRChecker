@@ -1,8 +1,8 @@
 const test=require('node:test'),assert=require('node:assert/strict');
 const {normalize,answerMatches,visualVerdict,relativePoints}=require('../objective-view.js');
-test('correct response is green and wrong response is red',()=>{
- assert.equal(visualVerdict({recognized:'A',expected:'A'}),'correct');
- assert.equal(visualVerdict({recognized:'A',expected:'C',auto_status:'需人工复核'}),'wrong');
+test('automatic pass is green and unreviewed mismatch is pending',()=>{
+ assert.equal(visualVerdict({recognized:'A',expected:'A',auto_status:'自动通过'}),'correct');
+ assert.equal(visualVerdict({recognized:'A',expected:'C',auto_status:'需人工复核'}),'pending');
 });
 test('multiple answers compare as sets',()=>{
  assert.ok(answerMatches(' CBA ','ABC'));assert.equal(answerMatches('AB','ABC'),false);
@@ -11,8 +11,8 @@ test('ambiguous or missing reference uses pending color',()=>{
  assert.equal(visualVerdict({recognized:'AB',expected:'A',recognition_warning:'多处填涂'}),'pending');
  assert.equal(visualVerdict({recognized:'A',expected:''}),'pending');
 });
-test('empty recognized response is wrong when a reference exists',()=>{
- assert.equal(visualVerdict({recognized:'',expected:'C'}),'wrong');
+test('blank recognition stays pending until reviewed',()=>{
+ assert.equal(visualVerdict({recognized:'',expected:'C',auto_status:'空白'}),'pending');
 });
 test('manual verdict takes precedence',()=>{
  assert.equal(visualVerdict({recognized:'A',expected:'C',manual_status:'通过'}),'correct');

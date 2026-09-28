@@ -19,6 +19,7 @@ import cv2
 import fitz
 import numpy as np
 
+from ai_judge import _validated_score, _score_status
 from ai_judge import AI_REVIEW_POLICY, _clean_visual_text, judge_handwritten_items
 from answer_alignment import align_printed_region
 from candidate_identity import IDENTITY_FIELDS, prepare_name_crop, name_fields
@@ -28,6 +29,7 @@ from recognition_assets import REFERENCE_PDF, MARKER_ASSET, require_file
 PAGE_W = 595.2756
 PAGE_H = 841.8898
 MARKER_INSET_PT = 26.0
+DISPLAY_CROP_PADDING_PT = (4.0, 2.0)
 PAPER_TYPE_OPTIONS = "ABC"
 PAPER_TYPE_BUBBLE_X = 458.0
 PAPER_TYPE_BUBBLE_Y = 259.0
@@ -609,6 +611,16 @@ def _crop_pdf_rect(image, x, y, width, height):
     return image[top:bottom, left:right].copy()
 
 
+def _expand_crop_rect(rect):
+    """Expand visual/AI context in PDF points, clamped to the reference page."""
+    x, y, width, height = rect
+    horizontal, vertical = DISPLAY_CROP_PADDING_PT
+    left, bottom = max(0.0, x - horizontal), max(0.0, y - vertical)
+    right = min(PAGE_W, x + width + horizontal)
+    top = min(PAGE_H, y + height + vertical)
+    return left, bottom, right - left, top - bottom
+
+
 def _crop_aligned_rect(image, rect, matrix=None):
     """把参考框映射回扫描图，直接截取原像素，保留细小标点笔画。"""
     if matrix is None:
@@ -967,7 +979,9 @@ def extract_answer_card(card_paths, image_dir=None, template_config=None):
         crop = _crop_aligned_rect(crop_image, (x, y, width, height), matrix)
         reference_coordinates = reference_rect or (x, y, width, height)
         reference = _crop_pdf_rect(references[page_index], *reference_coordinates) if page_index < len(references) else None
-        display_crop = _crop_aligned_rect(crop_image, display_rect, matrix) if display_rect else crop
+        # Add context for review and AI while keeping OCR/ink sampling stable.
+        expanded_rect = _expand_crop_rect(display_rect or (x, y, width, height))
+        display_crop = _crop_aligned_rect(crop_image, expanded_rect, matrix)
         # 明显缩放/剪切时恢复标准字形；轻微偏移直接使用原扫描像素。
         distortion = float(np.max(np.abs(np.asarray(matrix)[:, :2] - np.eye(2)))) if matrix is not None else 0.0
         ocr_crop = _crop_pdf_rect(region_images[region], x, y, width, height) if distortion > 0.02 else crop
@@ -1042,17 +1056,22 @@ def extract_answer_card(card_paths, image_dir=None, template_config=None):
                 crop_paths[label] = str(path)
     name_crop, name_ratio = prepare_name_crop(normalized[0], image_dir)
     has_name_ink = name_ratio >= 0.006
-    if not local_ocr and image_dir is not None and has_name_ink:
+    if image_dir is not None and has_name_ink:
+        # AI reads the original name crop, including fine handwriting strokes.
         name_crop = cv2.imdecode(np.frombuffer(
             (Path(image_dir) / "identity" / "name.png").read_bytes(), np.uint8), cv2.IMREAD_GRAYSCALE)
-    recognition_crops = (crops if local_ocr else display_crops) + ([name_crop] if has_name_ink else [])
-    recognition_labels = labels + (["姓名"] if has_name_ink else [])
-    # Keep the default call compatible with custom local recognizers.
+    name_in_ai_batch = has_name_ink and not local_ocr
+    recognition_crops = (crops if local_ocr else display_crops) + ([name_crop] if name_in_ai_batch else [])
+    recognition_labels = labels + (["姓名"] if name_in_ai_batch else [])
+    # Question recognition keeps its selected mode; names always use vision AI.
     results = (_recognize_crops(recognition_crops, recognition_labels)
                if local_ocr and resolve_local_ocr_enabled() else
                _recognize_crops(recognition_crops, recognition_labels, local_ocr_enabled=local_ocr))
-    identity = name_fields(results.pop() if has_name_ink else None, name_ratio)
-    identity["student_name_source"] = "ocr" if local_ocr else "ai"
+    name_prediction = results.pop() if name_in_ai_batch else None
+    if has_name_ink and local_ocr:
+        name_prediction = _recognize_crops([name_crop], ["姓名"], local_ocr_enabled=False)[0]
+    identity = name_fields(name_prediction, name_ratio)
+    identity["student_name_source"] = "ai"
     text_fields = {}
     errors = []
     for label, result, ink_ratio in zip(labels, results, ink_ratios):
@@ -1081,7 +1100,8 @@ def extract_answer_card(card_paths, image_dir=None, template_config=None):
             "page1_program_y_pt": round(program_adjust, 2),
             "page1_program_match_score": round(program_match_score, 4),
             "regions": region_alignment,
-            "version": 4,
+            "version": 5,
+            "display_padding_pt": {"x": DISPLAY_CROP_PADDING_PT[0], "y": DISPLAY_CROP_PADDING_PT[1]},
             "answer_card_layout": answer_card_layout,
             "material_mode": material_mode,
         },
@@ -1242,11 +1262,16 @@ def _text_final_status(item):
     if manual in {"通过", "不通过"}:
         return manual
     ai_status = item.get("ai_status")
+    if ai_status in {"AI通过", "AI不通过", "AI部分得分"} and item.get("ai_score") is not None:
+        score = _validated_score(item["ai_score"], item.get("score"))
+        if score is None:
+            return "待复核"
+        return {"AI通过": "通过", "AI不通过": "不通过", "AI部分得分": "部分得分"}[_score_status(score, item["score"])]
     if ai_status == "AI通过":
         return "通过"
     if ai_status == "AI不通过":
         return "不通过"
-    if ai_status == "AI需复核":
+    if ai_status in {"AI需复核", "AI部分得分"}:
         return "待复核"
     return item.get("auto_status", "待复核")
 
@@ -1270,9 +1295,13 @@ def _score_summary(review):
         score = float(item.get("score", 0) or 0)
         status = _text_final_status(item)
         awarded = score if status in pass_statuses else 0.0
+        if item.get("manual_status") not in {"通过", "不通过"} and item.get("ai_status") in {"AI通过", "AI不通过", "AI部分得分"}:
+            ai_score = _validated_score(item.get("ai_score"), score)
+            if ai_score is not None:
+                awarded = ai_score
         if item.get("manual_status") in {"通过", "不通过"}:
             score_basis = "人工复核"
-        elif item.get("ai_status") in {"AI通过", "AI不通过", "AI需复核"}:
+        elif item.get("ai_status") in {"AI通过", "AI不通过", "AI部分得分", "AI需复核"}:
             score_basis = "AI审核"
         else:
             score_basis = "规则初判"
@@ -1281,10 +1310,10 @@ def _score_summary(review):
         item["awarded_score"] = _score_number(awarded)
         text_score += awarded
         text_possible += score
-        if status not in pass_statuses | fail_statuses:
+        if status not in pass_statuses | fail_statuses | {"部分得分"}:
             pending_score += score
-        elif status in fail_statuses:
-            failed_score += score
+        else:
+            failed_score += score - awarded
     earned = objective_score + text_score
     possible = objective_possible + text_possible
     return {
@@ -1306,6 +1335,7 @@ def _review_summary(items):
         "manual": sum(item.get("auto_status") != "自动通过" for item in items),
         "ai_pass": sum(item.get("ai_status") == "AI通过" for item in items),
         "ai_fail": sum(item.get("ai_status") == "AI不通过" for item in items),
+        "ai_partial": sum(item.get("ai_status") == "AI部分得分" for item in items),
         "ai_review": sum(item.get("ai_status") == "AI需复核" for item in items),
     }
 
@@ -1320,7 +1350,7 @@ def refresh_rule_judgments(review):
         eligible = True
         if (
             _is_correction_question(item.get("question"))
-            and item.get("ai_status") in {"AI通过", "AI不通过", "AI需复核"}
+            and item.get("ai_status") in {"AI通过", "AI不通过", "AI部分得分", "AI需复核"}
             and item.get("ai_review_policy") not in {AI_REVIEW_POLICY, "pending-" + AI_REVIEW_POLICY}
             and item.get("manual_status") not in {"通过", "不通过"}
             and not review.get("grade_confirmed")
@@ -1363,7 +1393,7 @@ def refresh_rule_judgments(review):
 
 def _validate_visual_judgment(item):
     """以图像转录校验AI结论，OCR置信度和文本只保留作参考。"""
-    if item.get("ai_status") not in {"AI通过", "AI不通过", "AI需复核"}:
+    if item.get("ai_status") not in {"AI通过", "AI不通过", "AI部分得分", "AI需复核"}:
         return
     evidence = item.get("ai_visual_evidence") or {}
     visual = item.get("ai_visual_text", "").strip()
@@ -1408,12 +1438,13 @@ def _validate_visual_judgment(item):
     if strict_status != "自动通过":
         item["ai_status"] = "AI不通过" if strict_status == "不通过" else "AI需复核"
         item["ai_reason"] = "图像转录校验：" + strict_reason
-    elif evidence.get("image_status") == "clear" and item.get("ai_status") in {"AI通过", "AI不通过"}:
+    elif evidence.get("image_status") == "clear" and item.get("ai_status") in {"AI通过", "AI不通过", "AI部分得分"}:
         item["ai_status"], item["ai_reason"] = "AI通过", "原图转录的手写行号和改错内容与参考答案一致"
 
 
 def _apply_ai_review_result(item, result):
     """把单个题目的 AI 响应写回题目，供整体和单题重识别共用。"""
+    item["ai_score"] = None
     result_map = result.get("results", {})
     ai_result = result_map.get(str(item.get("question", "")))
     if ai_result:
@@ -1432,7 +1463,24 @@ def _apply_ai_review_result(item, result):
                 float(item["ai_confidence"] or 0),
                 float(item["ai_visual_evidence"].get("confidence", 0) or 0),
             )
+        has_score = "awarded_score" in ai_result or "score" in ai_result
+        if has_score:
+            item["ai_score"] = _validated_score(ai_result.get("awarded_score", ai_result.get("score")), item.get("score"))
+            if item["ai_score"] is None:
+                item["ai_status"] = "AI需复核"
+                item["ai_reason"] = "AI分数待复核；" + item["ai_reason"]
+            elif item["ai_status"] != "AI需复核":
+                item["ai_status"] = _score_status(item["ai_score"], item["score"])
+        elif item["ai_status"] == "AI部分得分":
+            item["ai_status"] = "AI需复核"
+            item["ai_reason"] = "部分得分结果需要具体分数；" + item["ai_reason"]
         _validate_visual_judgment(item)
+        if item["ai_status"] == "AI通过":
+            item["ai_score"] = _validated_score(item.get("score", 0), item.get("score", 0))
+        elif item["ai_status"] == "AI不通过":
+            item["ai_score"] = 0
+        elif item["ai_status"] != "AI部分得分":
+            item["ai_score"] = None
     elif result.get("status") == "未配置":
         item["ai_status"] = "AI待配置"
         item["ai_confidence"] = 0.0

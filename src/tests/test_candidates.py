@@ -73,19 +73,29 @@ def test_background_ocr_preserves_manual_name():
     assert review['name_ocr']=='张三'
 
 
-def test_new_answer_card_recognizes_name_in_the_same_ocr_batch(monkeypatch,tmp_path):
+@pytest.mark.parametrize('local_ocr_enabled', [True, False])
+def test_new_answer_card_automatically_recognizes_name_with_ai(monkeypatch,tmp_path,local_ocr_enabled):
     import exam_review as er
-    image=page_with_name();calls=[]
+    image=page_with_name();calls=[];name_images=[]
     monkeypatch.setattr(er,'_load_page',lambda _: [('p1',image)])
-    monkeypatch.setattr(er,'_align_and_order_pages',lambda images:(images,[1]))
-    monkeypatch.setattr(er,'_reference_pages',lambda:[])
-    def recognize(crops,labels):
-        calls.append(labels);return [prediction('张三' if label=='姓名' else '') for label in labels]
+    monkeypatch.setattr(er,'_align_and_order_pages',lambda images,**kwargs:(images,[1]))
+    monkeypatch.setattr(er,'_reference_pages',lambda *args,**kwargs:[])
+    def recognize(crops,labels,local_ocr_enabled=None):
+        calls.append((labels,local_ocr_enabled))
+        if '姓名' in labels:name_images.append(crops[labels.index('姓名')].copy())
+        return [prediction('张三' if label=='姓名' else '') for label in labels]
     monkeypatch.setattr(er,'_recognize_crops',recognize)
-    card=er.extract_answer_card([tmp_path/'card.png'],tmp_path/'crops')
-    assert len(calls)==1 and calls[0][-1]=='姓名'
-    assert card['student_name']=='张三' and '姓名' not in card['text_fields']
-    assert (tmp_path/'crops/identity/name.png').is_file()
+    card=er.extract_answer_card([tmp_path/'card.png'],tmp_path/'crops',{'local_ocr_enabled':local_ocr_enabled})
+    assert len(calls)==(2 if local_ocr_enabled else 1)
+    assert calls[-1][0][-1]=='姓名' and calls[-1][1] is False
+    if local_ocr_enabled:assert '姓名' not in calls[0][0]
+    assert card['student_name']=='张三' and card['student_name_source']=='ai'
+    assert card['local_ocr_enabled'] is local_ocr_enabled
+    assert '姓名' not in card['text_fields']
+    raw_path=tmp_path/'crops/identity/name.png'
+    assert raw_path.is_file()
+    raw=cv2.imdecode(np.frombuffer(raw_path.read_bytes(),np.uint8),cv2.IMREAD_GRAYSCALE)
+    assert np.array_equal(name_images[0],raw)
 
 
 def test_review_build_carries_identity_without_changing_scores(monkeypatch):
@@ -285,3 +295,111 @@ def test_question_score_records_preserve_scout_native_ids():
     assert records[0]["question_id"] == 78
     assert records[0]["session_id"] == 14
     assert records[0]["section_id"] == 13
+
+
+@pytest.mark.parametrize('local_ocr_enabled', [True, False])
+def test_blank_imported_name_skips_name_ai_and_remains_editable(monkeypatch,tmp_path,local_ocr_enabled):
+    import exam_review as er
+    image=np.full((1684,1191),255,np.uint8);cv2.line(image,(900,341),(1096,341),0,2)
+    monkeypatch.setattr(er,'_load_page',lambda _: [('front',image)])
+    monkeypatch.setattr(er,'_align_and_order_pages',lambda images,**kwargs:(images,[1]))
+    monkeypatch.setattr(er,'_reference_pages',lambda *args,**kwargs:[])
+    calls=[]
+    def recognize(crops,labels,local_ocr_enabled=None):
+        calls.append(labels);return [prediction('') for _ in labels]
+    monkeypatch.setattr(er,'_recognize_crops',recognize)
+    card=er.extract_answer_card([tmp_path/'blank.png'],tmp_path/'crops',{'local_ocr_enabled':local_ocr_enabled})
+    assert all('姓名' not in labels for labels in calls)
+    assert card['student_name']=='' and card['student_name_status']=='待填写'
+
+
+def test_name_ai_failure_preserves_question_recognition_and_scores(monkeypatch,tmp_path):
+    import exam_review as er
+    monkeypatch.setattr(er,'_load_page',lambda _: [('front',page_with_name())])
+    monkeypatch.setattr(er,'_align_and_order_pages',lambda images,**kwargs:(images,[1]))
+    monkeypatch.setattr(er,'_reference_pages',lambda *args,**kwargs:[])
+    monkeypatch.setattr(er,'_handwriting_ratio',lambda *a:.03)
+    def recognize(crops,labels,local_ocr_enabled=None):
+        if labels==['姓名']:
+            assert local_ocr_enabled is False
+            return [prediction('',0,'AI接口暂时超时')]
+        return [prediction('42') for _ in labels]
+    monkeypatch.setattr(er,'_recognize_crops',recognize)
+    card=er.extract_answer_card([tmp_path/'card.png'],tmp_path/'crops',{'local_ocr_enabled':True})
+    assert card['student_name']=='' and card['student_name_status']=='识别异常'
+    assert card['student_name_source']=='ai' and card['name_ocr_error']=='AI接口暂时超时'
+    assert card['text_fields']['31']['text']=='42' and card['recognition_mode']=='local_ocr_ai'
+    review=er._build_review_from_maps({}, {'31':'42'}, {}, [], score_map={'31':2}, card=card)
+    assert review['items'][0]['recognized_text']=='42'
+    assert review['score_summary']['total_score']==2
+
+
+@pytest.mark.parametrize('local_ocr_enabled', [True, False])
+def test_name_retry_always_uses_ai_independently_of_question_mode(monkeypatch,tmp_path,local_ocr_enabled):
+    import exam_review as er
+    manager,load,path=manager_fixture(tmp_path);manager.recognizer=None
+    initial=load('review-01')[2];initial['local_ocr_enabled']=local_ocr_enabled
+    path.write_text(json.dumps(initial),encoding='utf-8');calls=[]
+    def recognize(crops,labels,local_ocr_enabled=None):
+        calls.append((labels,local_ocr_enabled));return [prediction('李四')]
+    monkeypatch.setattr(er,'_recognize_crops',recognize)
+    manager.start({'review_ids':['review-01']});manager.future.result(timeout=5)
+    saved=load('review-01')[2]
+    assert calls==[(['姓名'],False)]
+    assert saved['student_name']=='李四' and saved['student_name_source']=='ai'
+    assert saved['local_ocr_enabled'] is local_ocr_enabled
+    assert saved['score_summary']==initial['score_summary']
+
+
+def test_ai_retry_preserves_a_manually_confirmed_name(monkeypatch,tmp_path):
+    import exam_review as er
+    manager,load,path=manager_fixture(tmp_path);manager.recognizer=None
+    manager.save({'review_id':'review-01','student_name':'老师校正','student_id':'202609280001','paper_type':'A'})
+    monkeypatch.setattr(er,'_recognize_crops',lambda *a,**k:[prediction('张三')])
+    manager.start({'review_ids':['review-01']});manager.future.result(timeout=5)
+    saved=load('review-01')[2]
+    assert saved['student_name']=='老师校正' and saved['student_name_source']=='manual'
+    assert saved['student_name_status']=='已确认' and saved['name_ocr']=='张三'
+
+
+@pytest.mark.parametrize('count', [1, 2])
+def test_single_and_batch_import_persist_ai_names_without_candidate_action(monkeypatch,tmp_path,count):
+    import base64
+    import exam_review as er
+    import scan_ui
+    monkeypatch.setattr(scan_ui,'IMPORT_ROOT',tmp_path/'imports')
+    monkeypatch.setattr(scan_ui,'REVIEW_ROOT',tmp_path/'reviews')
+    monkeypatch.setattr(scan_ui,'ai_is_configured',lambda:False)
+    monkeypatch.setattr(scan_ui.PLATFORM_PERSISTENCE,'sync_tree',lambda *a,**k:None)
+    monkeypatch.setattr(scan_ui.PLATFORM_PERSISTENCE,'sync_file',lambda *a,**k:None)
+    monkeypatch.setattr(er,'_load_page',lambda _: [('front',page_with_name())])
+    monkeypatch.setattr(er,'_align_and_order_pages',lambda images,**kwargs:(images,[1]))
+    monkeypatch.setattr(er,'_reference_pages',lambda *args,**kwargs:[])
+    monkeypatch.setattr(er,'_handwriting_ratio',lambda *a:.03)
+    name_calls=[]
+    def recognize(crops,labels,local_ocr_enabled=None):
+        if '姓名' in labels:
+            assert labels==['姓名'] and local_ocr_enabled is False
+            name_calls.append(labels)
+        return [prediction('张三' if label=='姓名' else '42') for label in labels]
+    monkeypatch.setattr(er,'_recognize_crops',recognize)
+    imported=scan_ui.run_exam_import({'exam_text':json.dumps([{'name':'填空','questions':[{'type':'fill','title':'31. Item','score':2,'answer':'42'}]}])})
+    photo={'name':'card.png','data':base64.b64encode(cv2.imencode('.png',page_with_name())[1].tobytes()).decode('ascii')}
+    payload={'import_id':imported['import_id'],'local_ocr_enabled':True,'card_files':[photo]}
+    if count==1:
+        records=[scan_ui.run_review_job(payload)]
+    else:
+        payload['card_groups']=[{'label':str(i),'files':[photo]} for i in range(count)]
+        batch=scan_ui.start_batch_review(payload)
+        worker=scan_ui.BATCH_REVIEW_WORKERS.get(batch['batch_id'])
+        if worker:worker.join(20);assert not worker.is_alive()
+        saved_batch=json.loads(scan_ui._batch_path(batch['batch_id'])[1].read_text(encoding='utf-8'))
+        assert all(entry.get('review_id') for entry in saved_batch['reviews']),saved_batch
+        records=[scan_ui._load_review(entry['review_id'])[2] for entry in saved_batch['reviews']]
+    assert len(name_calls)==count
+    for record in records:
+        saved=scan_ui._load_review(record['review_id'])[2]
+        assert saved['student_name']=='张三' and saved['student_name_source']=='ai'
+        assert saved['student_name_status']=='待确认'
+        assert saved['local_ocr_enabled'] is True
+        assert saved['score_summary']['total_score']==2

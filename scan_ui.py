@@ -994,7 +994,7 @@ def run_ai_review(payload):
     with AI_REVIEW_LOCK:
         _id, _path, latest = _load_review(review_id)
         by_question = {str(item.get("question")): item for item in updated.get("items", [])}
-        ai_fields = ("ai_status", "ai_confidence", "ai_visual_text", "ai_reason", "ai_corrected_answer", "ai_review_policy", "ai_visual_evidence", "expected_answer", "final_status", "score_basis", "awarded_score")
+        ai_fields = ("ai_status", "ai_score", "ai_confidence", "ai_visual_text", "ai_reason", "ai_corrected_answer", "ai_review_policy", "ai_visual_evidence", "expected_answer", "final_status", "score_basis", "awarded_score")
         for item in latest.get("items", []):
             source = by_question.get(str(item.get("question")), {})
             if question_revision(item) == base_versions.get(str(item.get("question"))):
@@ -1009,7 +1009,7 @@ def run_ai_review(payload):
 
 
 AI_SINGLE_FIELDS = (
-    "ai_status", "ai_confidence", "ai_visual_text", "ai_reason",
+    "ai_status", "ai_score", "ai_confidence", "ai_visual_text", "ai_reason",
     "ai_corrected_answer", "ai_review_policy", "ai_visual_evidence",
     "expected_answer", "final_status", "score_basis", "awarded_score",
 )
@@ -1074,6 +1074,7 @@ def _ai_question_worker(review_id, question):
                 for item in review.get("items", []):
                     if str(item.get("question", "")).strip() == str(question).strip():
                         item["ai_status"] = "AI异常"
+                        item["ai_score"] = None
                         item["ai_confidence"] = 0.0
                         item["ai_reason"] = "AI处理失败：{}".format(error)
                         item["ai_visual_text"] = ""

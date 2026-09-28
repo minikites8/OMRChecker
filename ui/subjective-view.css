@@ -4,3 +4,8 @@
 @media(max-width:980px){.subjective-workspace{grid-template-columns:minmax(0,1fr) 184px}.subjective-sidebar{padding:15px 10px}.subjective-legend{font-size:9px;gap:4px}.subjective-document .review-controls{grid-template-columns:1fr}.subjective-scan-viewport{padding:11px}}
 @media(max-width:700px){.subjective-workspace{grid-template-columns:1fr}.subjective-document{border-right:0;border-radius:11px 11px 0 0}.subjective-sidebar{position:static;max-height:none;border-top:1px solid #e0e7f2;padding:18px}.subjective-question-grid{grid-template-columns:repeat(6,minmax(0,1fr))}.subjective-legend{justify-content:flex-start;gap:22px;font-size:11px}.subjective-selection-summary{display:flex;justify-content:space-between;flex-wrap:wrap}.subjective-document .review-controls{grid-template-columns:140px minmax(0,1fr)}}
 @media(max-width:440px){.subjective-question-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.subjective-toolbar{padding:13px}.subjective-document .review-item{padding:13px}.subjective-document .review-controls{grid-template-columns:1fr}.subjective-scan-viewport{padding:9px;max-height:410px}.subjective-question-button{height:39px}}
+
+/* Graded partial-credit answers remain distinct from pending review. */
+.subjective-legend{flex-wrap:wrap}.subjective-legend .partial,.subjective-selection-summary .partial{color:#8a5700}.subjective-question-button.partial{color:#8a5700;border-color:#e9c878;background:#fff8e7}
+/* Recognition stays readable below the scan while the image scrolls or zooms. */
+.subjective-document .subjective-scan-panel .subjective-recognized{margin:0;padding:11px 16px;border:0;border-top:1px solid #dce5f2;border-radius:0;background:#f9fbff;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}

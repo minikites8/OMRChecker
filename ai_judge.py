@@ -93,6 +93,7 @@ def _prompt_items(items):
         is_algorithm = _is_algorithm_question(question)
         payload.append({
             "question": question,
+            "max_score": item.get("score", 0),
             "question_kind": "correction" if is_correction else "algorithm" if is_algorithm else "general",
             "strict_requirements": (
                 "以原图的手写数字行号和改错内容进行双项校验；6/b、1/l、0/O等相似笔迹须通过图片辨认，笔迹存在歧义时返回review" if is_correction else
@@ -119,14 +120,15 @@ def _prompt_items(items):
 
 SYSTEM_PROMPT = """你是考试答题卡的手写答案判分助手。每次请求对应一道大题（例如 1.、2.、3.），包含该大题的全部填空位或小问。你会收到大题号、每个小问的题号、试卷题干、参考答案、OCR提取结果和OCR置信度。
 结合整道大题的上下文，逐个小问独立判定；返回每个输入题号各一条结果。请先直接阅读对应题号的手写区域图片，再参考 OCR 提取结果，逐题比较参考答案的语义、数学关系、程序逻辑和关键运算符。
-图片中的真实笔迹优先于 OCR 文本；OCR 可能漏字、错字或在空白处产生幻觉。对于图片中空白、写明放弃、逻辑相反或关键运算符错误的答案返回 fail。
+图片中的真实笔迹优先于 OCR 文本；OCR 可能漏字、错字或在空白处产生幻觉。对于图片中空白或写明放弃的答案给0分；其余答案按实际完成的得分点计分，逻辑、运算符等错误应在理由中说明对应扣分。
 允许等价表达、空格、标点和 OCR 常见字符误识别；程序题仔细检查运算符、数组下标、变量、常量、函数名和控制关系。图片模糊、关键内容有歧义或题目缺少参考答案时返回 review；第64题按开放算法题规则继续自主判分。
 图片为首要证据，OCR仅供参考。先观察原始笔画再核对内容。手写6/b、1/l、0/O常有相似字形，只有清晰图像证据才能决定实际字符，字形模糊时返回review。
 印刷标签需通过图像中的字体、位置、笔迹风格判断。文本“(b)”自身仅表示转录结果，其印刷或手写属性须由图像确认。
 提供visual_evidence时，它来自独立读图阶段，visual_text逐字保留该阶段的手写转录；image_status为uncertain/unavailable或line_number_status为ambiguous时返回review。参考答案仅用于判分，考生写了哪些内容以图像为准。
 第46至60题属于改错题，实行严格双项校验。visual_text 必须包含考生实际手写的数字行号和完整改错内容。图像清晰且确认只出现印刷小题标签时，visual_text记录实际手写内容，reason明确写出“缺少手写数字行号”，status返回fail。行号错误、改错内容缺失、改错内容错误均返回 fail。参考答案用于核对行号和内容，corrected_answer 只做规范化展示，不补充手写缺项。禁止根据题干或参考答案替考生补全行号，禁止用 corrected_answer 弥补手写缺项。
-第64题属于开放算法题，参考答案可能为空。请根据题干要求和图片中的实际手写内容自主判分：检查算法思路、正确性、关键步骤、边界条件、复杂度和代码实现。满足题目要求且核心逻辑正确返回 pass；核心逻辑错误、无法完成题目或与题意相反返回 fail；图片或手写内容存在关键歧义返回 review。参考答案为空时仍然必须完成判断，不能仅因缺少固定答案返回 review。
-每题返回识别出的真实手写内容 visual_text、判定依据 reason 和 0 到 1 的置信度。只返回 JSON，格式为 {"results":[{"question":"题号","status":"pass|fail|review","confidence":0到1,"visual_text":"图片中实际手写文字","reason":"中文理由","corrected_answer":"可选的规范化答案"}]}。
+第64题属于开放算法题，参考答案可能为空。请根据题干要求和图片中的实际手写内容自主判分：检查算法思路、正确性、关键步骤、边界条件、复杂度和代码实现。按算法思路、关键步骤、边界条件、复杂度和实现质量分配得分点；完整正确给满分，部分完成给相应分数，完全错误给0分；图片或手写内容存在关键歧义返回 review。参考答案为空时仍然必须完成判断，不能仅因缺少固定答案返回 review。
+每个小问的 max_score 是该小问满分，逐题独立评分；所有得分均落在0到max_score的闭区间。请给出具体数值 awarded_score，满分6分的题可给0、1、2、3、4、5、6分，评分依据允许时也可给小数分。reason说明得分点、扣分点与分值依据。已完成评分时，满分返回pass，0分返回fail，介于0和满分之间返回partial；待复核时返回review且awarded_score为null。改错题继续执行上述行号与内容双项校验。
+每题返回识别出的真实手写内容 visual_text、判定依据 reason 和 0 到 1 的置信度。只返回 JSON，格式为 {"results":[{"question":"题号","status":"pass|partial|fail|review","awarded_score":数值或null,"confidence":0到1,"visual_text":"图片中实际手写文字","reason":"中文得分与扣分理由","corrected_answer":"可选的规范化答案"}]}。
 """
 
 
@@ -245,7 +247,28 @@ def _status(value):
         return "AI通过"
     if normalized in {"fail", "incorrect", "不通过", "错误", "wrong"}:
         return "AI不通过"
+    if normalized in {"partial", "partial_credit", "部分得分"}:
+        return "AI部分得分"
     return "AI需复核"
+
+
+def _validated_score(value, maximum):
+    """Return a finite score within the question maximum, or None."""
+    if isinstance(value, bool) or isinstance(maximum, bool) or value is None:
+        return None
+    try:
+        score, limit = float(value), float(maximum)
+    except (ValueError, TypeError, OverflowError):
+        return None
+    if not math.isfinite(score) or not math.isfinite(limit) or limit < 0 or not 0 <= score <= limit:
+        return None
+    return score
+
+
+def _score_status(score, maximum):
+    if score == float(maximum):
+        return "AI通过"
+    return "AI不通过" if score == 0 else "AI部分得分"
 
 
 def _image_content(items, transcription=False):
@@ -431,7 +454,7 @@ def judge_handwritten_items(items, progress_callback=None):
 
     def process_group(group):
         group_label = str(group[0].get("major_question") or _group_key(group[0]))
-        requested = {str(item.get("question", "")).strip() for item in group}
+        requested = {str(item.get("question", "")).strip(): item for item in group}
         try:
             visual_items = [item for item in group if _is_correction_question(item.get("question"))]
             evidence = _read_visual_evidence(config, visual_items) if visual_items else {}
@@ -456,6 +479,19 @@ def judge_handwritten_items(items, progress_callback=None):
                     "corrected_answer": str(result.get("corrected_answer", "")).strip(),
                     "policy": AI_REVIEW_POLICY,
                 }
+                entry = group_results[question]
+                if "awarded_score" in result or "score" in result:
+                    score = _validated_score(result.get("awarded_score", result.get("score")), requested[question].get("score"))
+                    entry["awarded_score"] = None
+                    if score is None:
+                        entry["status"] = "AI需复核"
+                        entry["reason"] = "AI分数须为0到本题满分之间的有效数值；" + entry["reason"]
+                    elif entry["status"] != "AI需复核" or result.get("status") in (None, ""):
+                        entry["awarded_score"] = score
+                        entry["status"] = _score_status(score, requested[question]["score"])
+                elif entry["status"] == "AI部分得分":
+                    entry["status"] = "AI需复核"
+                    entry["reason"] = "部分得分结果需要具体分数；" + entry["reason"]
                 if question in evidence:
                     visual = evidence[question]
                     group_results[question]["visual_evidence"] = visual

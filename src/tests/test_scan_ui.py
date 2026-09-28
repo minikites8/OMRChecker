@@ -102,7 +102,7 @@ def test_ui_prompts_are_chinese_and_support_twelve_digits():
     assert 'id="reviewTotalScore"' in html
     assert "renderScoreBoard" in javascript
     assert "review-score-badge" in javascript
-    assert "得分 '+formatScore(score)" in javascript
+    assert "得分 '+formatScore(textLocalScore(item))" in javascript
     assert "buildImportedScoreMap" in javascript
     assert "loadReviewScoreMap" in javascript
     assert 'id="reviewConcurrency"' in html
@@ -135,7 +135,7 @@ def test_ai_judge_endpoint_updates_saved_review(tmp_path, monkeypatch):
     image_path.write_bytes(b"test-image")
     review_path.write_text(json.dumps({
         "ok": True,
-        "items": [{"question": "31", "handwriting_urls": ["/reviews/review-ai/output/handwriting/31.png"]}],
+        "items": [{"question": "31", "score": 2, "handwriting_urls": ["/reviews/review-ai/output/handwriting/31.png"]}],
     }, ensure_ascii=False), encoding="utf-8")
     monkeypatch.setattr(scan_ui, "REVIEW_ROOT", tmp_path)
     monkeypatch.setattr(scan_ui, "ai_is_configured", lambda: True)

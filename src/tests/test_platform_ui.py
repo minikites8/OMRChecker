@@ -28,7 +28,13 @@ def test_platform_views_and_unique_controls():
     assert page.views == [("dashboard", False), ("papers", True), ("candidates", True), ("grading", True),
                           ("results", True), ("sheets", True), ("templates", True), ("scanner", True), ("admin", True)]
     assert page.scripts[0].startswith("/static/platform.js")
-    assert page.scripts[-1].startswith("/static/app.js")
+    scripts = [source.split("?", 1)[0] for source in page.scripts]
+    # Review views register before app initialization; workflow binds afterward.
+    assert scripts.index("/static/objective-view.js") < scripts.index("/static/app.js")
+    if "/static/workflow.js" in scripts:
+        assert scripts.index("/static/app.js") < scripts.index("/static/workflow.js")
+    else:
+        assert scripts[-1] == "/static/app.js"
 
 
 def test_legacy_query_ids_still_exist():

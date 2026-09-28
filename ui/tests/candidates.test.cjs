@@ -1,5 +1,5 @@
 const test=require('node:test'),assert=require('node:assert/strict');
-const {filterCandidates,candidatePage,validateIdentity}=require('../candidates.js');
+const {filterCandidates,sortCandidates,candidatePage,validateIdentity}=require('../candidates.js');
 const records=[{review_id:'r1',student_name:'张三',student_id:'202619240110',student_name_status:'已确认'}, {review_id:'r2',student_name:'李四',student_id:'202619240110',student_name_status:'待确认'}, {review_id:'r3',student_name:'',student_id:'002619240111',student_name_status:'待识别'}];
 test('search supports name, twelve-digit id and leading zeroes',()=>{assert.equal(filterCandidates(records,' 张三 ').length,1);assert.equal(filterCandidates(records,'202619240110').length,2);assert.equal(filterCandidates(records,'002619240111')[0].review_id,'r3');});
 test('confirmation filters retain distinct answer cards',()=>{assert.equal(filterCandidates(records,'','pending').length,2);assert.equal(filterCandidates(records,'','confirmed')[0].review_id,'r1');assert.equal(filterCandidates(records,'').length,3);});
@@ -23,6 +23,8 @@ function candidateFixture(initialRecords){
     replaceChildren(...children){this.children=children;}
     setAttribute(name,value){this.attributes[name]=value;}
     removeAttribute(name){delete this.attributes[name];}
+    getAttribute(name){return this.attributes[name];}
+    focus(){this.focused=true;}
     addEventListener(name,fn){this.listeners[name]=fn;}
     querySelectorAll(){return [];}
     remove(){}
@@ -31,11 +33,11 @@ function candidateFixture(initialRecords){
   const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
   const elements=new Map([...html.matchAll(/id="([^"]+)"/g)].map(match=>[match[1],new Element()]));
   const $=id=>{assert.ok(elements.has(id),'element exists: '+id);return elements.get(id);};
-  const calls=[],events={},downloads=[],blobs=[];
+  const calls=[],events={},downloads=[],blobs=[],deletions=[];
   let currentRecords=initialRecords,exportReply;
   $('candidateFilter').value='all';
   const storage=new Map();
-  const window={addEventListener:(name,fn)=>events[name]=fn,dispatchEvent:()=>{},confirm:()=>true};
+  const window={addEventListener:(name,fn)=>events[name]=fn,dispatchEvent:()=>{},confirm:()=>true,reviewDeletion:{isDeleted:()=>false,remove:record=>deletions.push(record.review_id)}};
   const context={document:{getElementById:$,createElement:tag=>new Element(tag),body:new Element('body')},window,
     location:{hash:''},localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)},
     candidateSearch:$('candidateSearch'),candidateFilter:$('candidateFilter'),URLSearchParams,Blob,
@@ -56,7 +58,7 @@ function candidateFixture(initialRecords){
   const check=async(index,value)=>{const box=rows()[index].children[0].children[0];assert.equal(box.disabled,false);box.checked=value;await box.listeners.change();};
   const selectAll=async value=>{$('candidateSelectAll').checked=value;await $('candidateSelectAll').listeners.change();};
   const search=async value=>{$('candidateSearch').value=value;await $('candidateSearch').listeners.input();};
-  return {$,rows,check,selectAll,search,calls,downloads,blobs,events,refresh:()=>window.candidates.refresh(),setRecords:value=>currentRecords=value,setExportReply:fn=>exportReply=fn};
+  return {$,rows,check,selectAll,search,calls,downloads,blobs,events,deletions,setConfirm:fn=>window.confirm=fn,refresh:()=>window.candidates.refresh(),setRecords:value=>currentRecords=value,setExportReply:fn=>exportReply=fn};
 }
 function scoredRecords(){return [
   {review_id:'r1',student_name:'甲',student_name_status:'已确认',grade_confirmed:false,score_summary:{total_score:83,possible_score:100}},
@@ -111,4 +113,156 @@ test('export error keeps selection and presents the server message for retry',as
   f.setExportReply(async()=>({ok:false,json:async()=>({error:'所选考生记录已更新，请刷新列表后重新选择'})}));
   await f.$('candidateExportJson').listeners.click();assert.equal(f.$('candidateExportJson').disabled,false);
   assert.match(f.$('candidateMessage').textContent,/刷新列表/);assert.equal(f.downloads.length,0);
+});
+
+
+function clickCandidateRow(row,target={closest:()=>null}){row.listeners.click({target,defaultPrevented:false});}
+test('clicking a candidate row immediately switches the complete detail panel',async()=>{
+  const records=scoredRecords();Object.assign(records[1],{student_id:'202609280002',paper_type:'B',name_ocr:'乙',name_image_url:'/name-b.png'});
+  const f=candidateFixture(records);await f.refresh();clickCandidateRow(f.rows()[1]);
+  assert.equal(f.$('candidateName').value,'乙');assert.equal(f.$('candidateStudentId').value,'202609280002');assert.equal(f.$('candidatePaperType').value,'B');
+  assert.equal(f.$('candidateDetailHeading').textContent,'乙');assert.equal(f.$('candidateNameImage').src,'/name-b.png');
+  assert.equal(f.rows()[1].attributes['aria-current'],'true');assert.ok(f.rows()[1].className.includes('candidate-selected'));
+  assert.equal(f.rows()[0].attributes['aria-current'],undefined);
+});
+test('candidate rows expose direct selection and keep only the delete action',async()=>{
+  const f=candidateFixture(scoredRecords());await f.refresh();
+  for(const row of f.rows()){
+    assert.equal(row.tabIndex,0);assert.equal(row.attributes['aria-controls'],'candidateForm');
+    assert.ok(row.attributes['aria-label'].startsWith('查看考生'));
+    assert.deepEqual(row.children[4].children.map(button=>button.textContent),['删除']);
+  }
+  f.rows()[2].children[1].children[0].listeners.click();assert.equal(f.$('candidateName').value,'丙');
+});
+test('row selection ignores checkboxes, actions, inputs and the selection column',async()=>{
+  const f=candidateFixture(scoredRecords());await f.refresh();const original=f.$('candidateName').value;
+  let selector='';clickCandidateRow(f.rows()[1],{closest:value=>{selector=value;return {};}});
+  assert.equal(f.$('candidateName').value,original);
+  for(const target of ['button','a','input','select','textarea','label','.candidate-select-cell'])assert.ok(selector.split(',').includes(target));
+  await f.check(1,true);assert.equal(f.$('candidateName').value,original);assert.equal(f.$('candidateSelectionSummary').textContent,'已选择 1 人');
+  f.rows()[1].children[4].children[0].listeners.click();assert.deepEqual(f.deletions,['r2']);assert.equal(f.$('candidateName').value,original);
+});
+test('clicking the selected candidate retains current edits',async()=>{
+  const f=candidateFixture(scoredRecords());await f.refresh();clickCandidateRow(f.rows()[0]);
+  f.$('candidateName').value='已编辑姓名';f.$('candidateForm').listeners.input();
+  let prompts=0;f.setConfirm(()=>{prompts++;return true;});clickCandidateRow(f.rows()[0]);
+  assert.equal(f.$('candidateName').value,'已编辑姓名');assert.equal(prompts,0);
+});
+test('cancelling a dirty-row switch preserves selection and edited fields',async()=>{
+  const f=candidateFixture(scoredRecords());await f.refresh();clickCandidateRow(f.rows()[0]);
+  f.$('candidateName').value='已编辑姓名';f.$('candidateForm').listeners.input();
+  let prompts=0;f.setConfirm(()=>{prompts++;return false;});clickCandidateRow(f.rows()[1]);
+  assert.equal(prompts,1);assert.equal(f.$('candidateName').value,'已编辑姓名');assert.equal(f.rows()[0].attributes['aria-current'],'true');
+});
+test('confirming a dirty-row switch selects the clicked candidate and preserves export selection',async()=>{
+  const f=candidateFixture(scoredRecords());await f.refresh();clickCandidateRow(f.rows()[0]);await f.check(0,true);
+  f.$('candidateName').value='已编辑姓名';f.$('candidateForm').listeners.input();f.setConfirm(()=>true);clickCandidateRow(f.rows()[1]);
+  assert.equal(f.$('candidateName').value,'乙');assert.equal(f.$('candidateSelectionSummary').textContent,'已选择 1 人');
+});
+test('Enter and Space select a focused row and restore focus after rendering',async()=>{
+  const f=candidateFixture(scoredRecords());await f.refresh();
+  for(const [index,key] of [[1,'Enter'],[2,' ']]){
+    const row=f.rows()[index];let prevented=false;
+    row.listeners.keydown({target:row,key,preventDefault:()=>prevented=true});
+    assert.equal(prevented,true);assert.equal(f.rows()[index].attributes['aria-current'],'true');assert.equal(f.rows()[index].focused,true);
+  }
+});
+test('keyboard events from nested controls and navigation keys preserve row selection',async()=>{
+  const f=candidateFixture(scoredRecords());await f.refresh();clickCandidateRow(f.rows()[0]);const row=f.rows()[1];
+  for(const [target,key] of [[row.children[0],' '],[row,'ArrowDown']])row.listeners.keydown({target,key,preventDefault:()=>assert.fail('Unexpected preventDefault')});
+  assert.equal(f.$('candidateName').value,'甲');
+});
+test('filtered and paginated rows select their own candidate record',async()=>{
+  const records=Array.from({length:10},(_,i)=>({review_id:'r'+i,student_name:'考生'+i,score_summary:{total_score:i,possible_score:100}}));
+  const f=candidateFixture(records);await f.refresh();f.$('candidateNext').listeners.click();clickCandidateRow(f.rows()[1]);assert.equal(f.$('candidateName').value,'考生9');
+  await f.search('考生3');clickCandidateRow(f.rows()[0]);assert.equal(f.$('candidateName').value,'考生3');
+});
+
+
+test('candidate page makes import-time AI identification the default workflow',()=>{
+  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
+  assert.match(html,/<button[^>]*id="candidateRecognizeAll"[^>]*hidden/);
+  assert.match(html,/id="candidateRecognize"[^>]*>重新 AI 识别姓名/);
+  assert.match(html,/姓名随导入自动使用 AI 识别/);
+});
+test('candidate detail labels automatic AI name results and confidence',async()=>{
+  const records=scoredRecords();Object.assign(records[0],{student_name_source:'ai',name_ocr:'甲',student_name_confidence:.97});
+  const f=candidateFixture(records);await f.refresh();clickCandidateRow(f.rows()[0]);
+  assert.equal(f.$('candidateOcrText').textContent,'AI 识别结果：甲 · 置信度 97.00%');
+});
+test('pending identity description explains import-time automatic recognition',async()=>{
+  const f=candidateFixture(scoredRecords());await f.refresh();clickCandidateRow(f.rows()[1]);
+  assert.equal(f.$('candidateOcrText').textContent,'导入时自动 AI 识别姓名');
+});
+
+
+function scoreRecord(id,total,possible=100){return {review_id:id,student_name:id,score_summary:{total_score:total,possible_score:possible}};}
+function rowIds(f){return f.rows().map(row=>row.getAttribute('data-review-id'));}
+function changeScoreSort(f,order){f.$('candidateSort').value=order;f.$('candidateSort').listeners.change();}
+test('score sorting orders numeric values high to low including numeric strings',()=>{
+  const records=[scoreRecord('a',9),scoreRecord('b','100'),scoreRecord('c',35),scoreRecord('d','72.5')];
+  assert.deepEqual(sortCandidates(records,'score_desc').map(r=>r.review_id),['b','d','c','a']);
+});
+test('score sorting orders decimals and zero low to high',()=>{
+  const records=[scoreRecord('a',9.5),scoreRecord('b',100),scoreRecord('c',0),scoreRecord('d','2')];
+  assert.deepEqual(sortCandidates(records,'score_asc').map(r=>r.review_id),['c','d','a','b']);
+});
+test('pending and invalid scores stay last in both directions',()=>{
+  const invalid=[null,undefined,'',' ',NaN,Infinity,true,{},[]].map((value,i)=>scoreRecord('missing'+i,value));
+  invalid.push(scoreRecord('zero-possible',12,0),{review_id:'no-summary'});
+  const records=[...invalid,scoreRecord('zero',0),scoreRecord('high',75)];
+  for(const order of ['score_desc','score_asc']){
+    const sorted=sortCandidates(records,order);
+    assert.deepEqual(sorted.slice(0,2).map(r=>r.review_id),order==='score_desc'?['high','zero']:['zero','high']);
+    assert.deepEqual(sorted.slice(2).map(r=>r.review_id),invalid.map(r=>r.review_id));
+  }
+});
+test('equal totals keep source order and sort by displayed score rather than percentage',()=>{
+  const records=[scoreRecord('a',50,50),scoreRecord('b',80,100),scoreRecord('c',50,100),scoreRecord('d',50,60)];
+  assert.deepEqual(sortCandidates(records,'score_desc').map(r=>r.review_id),['b','a','c','d']);
+  assert.deepEqual(sortCandidates(records,'score_asc').map(r=>r.review_id),['a','c','d','b']);
+});
+test('sorting leaves source records unchanged and default restores API order',()=>{
+  const records=[scoreRecord('a',2),scoreRecord('b',9)];
+  sortCandidates(records,'score_desc');assert.deepEqual(records.map(r=>r.review_id),['a','b']);
+  for(const order of ['default','unknown','']){const result=sortCandidates(records,order);assert.deepEqual(result,records);assert.notEqual(result,records);}
+  assert.deepEqual(sortCandidates([],'score_desc'),[]);
+});
+test('score sorting applies across all pages before pagination',async()=>{
+  const f=candidateFixture(Array.from({length:10},(_,i)=>scoreRecord('r'+i,i)));await f.refresh();
+  changeScoreSort(f,'score_desc');assert.deepEqual(rowIds(f),['r9','r8','r7','r6','r5','r4','r3','r2']);
+  f.$('candidateNext').listeners.click();assert.deepEqual(rowIds(f),['r1','r0']);
+});
+test('changing score direction returns to page one and updates header semantics',async()=>{
+  const f=candidateFixture(Array.from({length:10},(_,i)=>scoreRecord('r'+i,i)));await f.refresh();f.$('candidateNext').listeners.click();
+  changeScoreSort(f,'score_asc');assert.match(f.$('candidatePage').textContent,/^1 \/ 2/);assert.equal(rowIds(f)[0],'r0');assert.equal(f.$('candidateScoreHeader').attributes['aria-sort'],'ascending');
+  changeScoreSort(f,'score_desc');assert.equal(f.$('candidateScoreHeader').attributes['aria-sort'],'descending');
+  changeScoreSort(f,'default');assert.equal(f.$('candidateScoreHeader').attributes['aria-sort'],'none');assert.equal(rowIds(f)[0],'r0');
+});
+test('score ordering composes with name search and confirmation filters',async()=>{
+  const records=[{...scoreRecord('group-a',20),student_name_status:'已确认'},scoreRecord('group-b',90),{...scoreRecord('group-c',60),student_name_status:'已确认'},scoreRecord('other',100)];
+  const f=candidateFixture(records);await f.refresh();changeScoreSort(f,'score_desc');await f.search('group');assert.deepEqual(rowIds(f),['group-b','group-c','group-a']);
+  f.$('candidateFilter').value='confirmed';f.$('candidateFilter').listeners.change();assert.deepEqual(rowIds(f),['group-c','group-a']);
+});
+test('sorting preserves checked export records and unsaved candidate detail',async()=>{
+  const f=candidateFixture(scoredRecords());await f.refresh();clickCandidateRow(f.rows()[0]);await f.check(1,true);
+  f.$('candidateName').value='保留的姓名修改';f.$('candidateForm').listeners.input();f.setConfirm(()=>assert.fail('Sorting must preserve the current detail'));
+  changeScoreSort(f,'score_asc');assert.equal(f.$('candidateName').value,'保留的姓名修改');assert.equal(f.$('candidateSelectionSummary').textContent,'已选择 1 人');
+  const selected=f.rows().find(row=>row.getAttribute('data-review-id')==='r1');assert.equal(selected.attributes['aria-current'],'true');
+  const checked=f.rows().find(row=>row.getAttribute('data-review-id')==='r2');assert.equal(checked.children[0].children[0].checked,true);
+});
+test('refresh reapplies the chosen order to updated scores',async()=>{
+  const f=candidateFixture([scoreRecord('a',1),scoreRecord('b',2)]);await f.refresh();changeScoreSort(f,'score_desc');assert.deepEqual(rowIds(f),['b','a']);
+  f.setRecords([scoreRecord('a',9),scoreRecord('b',2)]);await f.refresh();assert.deepEqual(rowIds(f),['a','b']);assert.equal(f.$('candidateSort').value,'score_desc');
+});
+test('score sorting keeps unscored records last across page boundaries',async()=>{
+  const records=[{review_id:'pending',student_name:'待出分'},...Array.from({length:9},(_,i)=>scoreRecord('r'+i,i))];
+  const f=candidateFixture(records);await f.refresh();
+  for(const order of ['score_desc','score_asc']){changeScoreSort(f,order);f.$('candidateNext').listeners.click();assert.equal(rowIds(f).at(-1),'pending');}
+});
+test('score sorting control is labeled and exposes both directions and default order',()=>{
+  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
+  assert.match(html,/for="candidateSort">成绩排序<\/label>/);
+  assert.match(html,/value="score_desc">分数从高到低/);assert.match(html,/value="score_asc">分数从低到高/);
+  assert.match(html,/id="candidateScoreHeader" aria-sort="none"/);
 });

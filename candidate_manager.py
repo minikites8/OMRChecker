@@ -1,5 +1,4 @@
-"""Candidate records backed by reviews; text recognition follows each review mode."""
-from recognition_config import resolve_local_ocr_enabled
+"""Candidate records backed by reviews; name recognition uses vision AI."""
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import json
@@ -20,13 +19,10 @@ def grade_confirmation_blockers(review):
         status = item.get("final_status") or item.get("auto_status") or "待复核"
         if status not in pass_statuses | fail_statuses:
             blockers.append("第{}题客观题{}".format(item.get("question", ""), status))
+    from exam_review import _text_final_status
     for item in review.get("items", []):
-        status = item.get("manual_status") if item.get("manual_status") in {"通过", "不通过"} else ""
-        if not status:
-            status = {"AI通过": "通过", "AI不通过": "不通过", "AI需复核": "待复核"}.get(
-                item.get("ai_status"), item.get("final_status") or item.get("auto_status") or "待复核"
-            )
-        if status not in pass_statuses | fail_statuses:
+        status = _text_final_status(item)
+        if status not in pass_statuses | fail_statuses | {"部分得分"}:
             blockers.append("第{}题{}".format(item.get("question", ""), status))
     ai_status = (review.get("ai_judgment") or {}).get("status")
     if ai_status == "处理中":
@@ -47,10 +43,15 @@ def question_score_records(review):
                 status = {"AI通过": "通过", "AI不通过": "不通过", "AI需复核": "待复核"}.get(
                     item.get("ai_status"), item.get("final_status") or item.get("auto_status") or "待复核"
                 )
+            if question_type == "文字题":
+                from exam_review import _text_final_status
+                status = _text_final_status(item)
             score = item.get("score", 0) or 0
             awarded = item.get("awarded_score")
             if awarded is None:
                 awarded = score if status in pass_statuses else 0
+                if question_type == "文字题" and status == "部分得分":
+                    awarded = item["ai_score"]
             records.append({
                 "question": str(item.get("question", "")),
                 "question_id": item.get("id") or item.get("question_id", ""),
@@ -168,8 +169,7 @@ class CandidateManager:
             try:
                 with self.lock:self.job['message']='正在识别第 {} / {} 份姓名'.format(self.job['completed']+1,self.job['total'])
                 with self.review_lock:
-                    _,_,saved_review=self.load(identifier)
-                local_ocr=resolve_local_ocr_enabled(saved_review.get('local_ocr_enabled'))
+                    self.load(identifier)
                 self.preview_builder(identifier)
                 folder=Path(self.root())/identifier/'output/handwriting'
                 image=cv2.imdecode(np.frombuffer((folder/'objective_view/page.png').read_bytes(),np.uint8),cv2.IMREAD_GRAYSCALE)
@@ -177,13 +177,12 @@ class CandidateManager:
                 if ratio>=.006:
                     if self.recognizer is None:
                         from exam_review import _recognize_crops
-                        if not local_ocr:
-                            crop=cv2.imdecode(np.frombuffer((folder/'identity/name.png').read_bytes(),np.uint8),cv2.IMREAD_GRAYSCALE)
-                        predictions=_recognize_crops([crop],['姓名'],local_ocr_enabled=local_ocr)
+                        crop=cv2.imdecode(np.frombuffer((folder/'identity/name.png').read_bytes(),np.uint8),cv2.IMREAD_GRAYSCALE)
+                        predictions=_recognize_crops([crop],['姓名'],local_ocr_enabled=False)
                     else:predictions=self.recognizer([crop],['姓名'])
                     fields=name_fields(predictions[0],ratio)
                 else:fields=name_fields(None,ratio)
-                fields['student_name_source']='ocr' if local_ocr else 'ai'
+                fields['student_name_source']='ai'
                 with self.review_lock:
                     _,path,review=self.load(identifier)
                     merge_name_fields(review,fields);self.write(path,review)

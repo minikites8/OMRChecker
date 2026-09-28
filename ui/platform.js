@@ -13,7 +13,7 @@
     scanner: ['基础扫描', '使用当前扫描模板识别填涂与文字，导出原始数据。', '辅助工具']
   };
   function route(hash) { const value = String(hash || '').replace(/^#/, ''); return Object.hasOwn(views, value) ? value : 'dashboard'; }
-  function isPending(status) { return !['自动通过', '通过', '不通过', 'AI通过', 'AI不通过'].includes(status); }
+  function isPending(status) { return !['自动通过', '通过', '不通过', '部分得分', 'AI通过', 'AI不通过', 'AI部分得分'].includes(status); }
   function csvCell(value) {
     let text = String(value == null ? '' : value);
     if (/^\s*[=+@-]/.test(text)) text = "'" + text;
@@ -35,7 +35,7 @@
   const core = { route, isPending, csvCell, matchingPapers, pageSlice, formatImportDate };
   if (typeof module === 'object' && module.exports) { module.exports = core; return; }
   const $ = id => document.getElementById(id);
-  const model = { imports: [], records: new Map(), current: null, batch: null, page: 1, filter: 'all', dirty: false, ready: false };
+  const model = { imports: [], records: new Map(), current: null, batch: null, page: 1, filter: 'all', dirty: false, ready: false, historyLoading: false };
   const number = value => String(Math.round((Number(value) || 0) * 100) / 100);
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -73,6 +73,7 @@
     $('breadcrumbCurrent').textContent = title;
     document.title = title + ' · 阅卷台';
     closeMenu();
+    if (model.ready && ['results', 'dashboard'].includes(active)) loadReviewHistory();
     if (focus) { $('pageTitle').focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: 'instant' }); }
   }
   function navigate(view) {
@@ -203,6 +204,37 @@
     const pending = record.review_id === model.current?.review_id ? currentPending() : Number(record.score_summary?.pending_score || 0);
     return pending > 0 ? ['待复核', 'warning'] : ['已出分', 'success'];
   }
+  async function loadReviewHistory() {
+    if (model.historyLoading) return;
+    model.historyLoading = true;
+    const recordsAtRequest = new Map(model.records);
+    try {
+      const response = await fetch('/api/candidates', { cache: 'no-store' });
+      const result = await response.json();
+      if (!response.ok || !result.ok || !Array.isArray(result.candidates)) {
+        throw new Error(result.error || '请稍后重试');
+      }
+      // Persisted records arrive newest first; the renderer reverses map order.
+      const merged = new Map();
+      result.candidates.slice().reverse().forEach(record => {
+        const id = record.review_id;
+        if (!id || window.reviewDeletion?.isDeleted(id)) return;
+        const current = model.records.get(id);
+        // Keep local edits and batch results received during this request.
+        const protect = current && (id === model.current?.review_id || current !== recordsAtRequest.get(id));
+        merged.set(id, protect ? { ...record, ...current } : { ...current, ...record });
+      });
+      model.records.forEach((record, key) => {
+        if (!merged.has(key) && !window.reviewDeletion?.isDeleted(record.review_id)) merged.set(key, record);
+      });
+      model.records = merged;
+      renderRecords();
+    } catch (error) {
+      toast('历史批改记录加载失败：' + error.message);
+    } finally {
+      model.historyLoading = false;
+    }
+  }
   function renderRecords() {
     const rows = Array.from(model.records.values()).filter(record => !window.reviewDeletion?.isDeleted(record.review_id)).reverse();
     const body = $('recentReviewRows'); body.replaceChildren();
@@ -231,11 +263,14 @@
     const selector = $('reviewRecordSelect');
     const selected = model.current?.review_id || ''; selector.replaceChildren();
     const ready = rows.filter(record => record.review_id);
+    if (!selected && ready.length) {
+      const placeholder = element('option', '', '请选择批改记录'); placeholder.value = ''; selector.append(placeholder);
+    }
     ready.forEach(record => {
       const option = element('option', '', (record.student_name ? record.student_name + ' · ' : '') + (record.student_id ? record.student_id + ' · ' : '') + (record.label || record.review_id));
       option.value = record.review_id; selector.append(option);
     });
-    selector.value = selected; $('reviewRecordPicker').hidden = ready.length < 2;
+    selector.value = selected; $('reviewRecordPicker').hidden = !ready.length || (ready.length === 1 && Boolean(selected));
   }
   const picker = element('label', 'record-picker'); picker.id = 'reviewRecordPicker'; picker.hidden = true;
   picker.append(element('span', '', '切换试卷')); const select = element('select'); select.id = 'reviewRecordSelect'; picker.append(select);
@@ -316,7 +351,7 @@
     $('reviewScanButton').querySelector('span').textContent = event.detail.running ? '正在批改…' : '开始批改';
     $('openImport').disabled = event.detail.running;
   });
-  window.addEventListener('platform:ready', () => { model.ready = true; renderRecords(); });
+  window.addEventListener('platform:ready', () => { model.ready = true; renderRecords(); loadReviewHistory(); });
   $('reviewResults').addEventListener('input', event => {
     if (!event.target.matches('input,select') || !event.target.closest('.review-controls,.objective-controls')) return;
     model.dirty = true; $('reviewSaveStatus').textContent = '修改待保存';
