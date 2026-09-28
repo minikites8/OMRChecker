@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import re
-from collections import Counter
+import unicodedata
+from collections import Counter, defaultdict
 from pathlib import Path
 
 
@@ -71,38 +72,220 @@ def _variant_answer_payload(payload):
     return payload
 
 
+NUMBER_FIELDS = (
+    "local_question_ids", "question_numbers", "number", "question_number",
+    "question_no", "questionNumber", "questionNo", "qno", "local_number",
+)
+_NUMBER = r"(?:\d+|[零〇一二两三四五六七八九十百千]+)"
+_NUMBER_ATOM = _NUMBER + r"(?:\s*\(\s*" + _NUMBER + r"\s*\))?"
+_NUMBER_EXPRESSION = _NUMBER_ATOM + r"(?:\s*(?:[-~至到]|[,、;])\s*" + _NUMBER_ATOM + r")*"
+_NUMBER_LABEL = r"(?:题目编号|题号|编号|question|ques|q)\s*[:.#]?\s*"
+_NUMBER_BOUNDARY = r"(?=$|\s|[、:;)\]]|\.(?!\d))"
+
+
+def _numbering_text(value):
+    """Normalize numbering syntax only; retain answer/code text verbatim."""
+    text = unicodedata.normalize("NFKC", str(value)).strip()
+    return text.translate(str.maketrans({
+        "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "−": "-",
+        "【": "[", "】": "]", "〔": "[", "〕": "]",
+    }))
+
+
+def _question_integer(text):
+    text = text.strip()
+    if text.isdecimal():
+        return int(text)
+    digits = dict(zip("零〇一二两三四五六七八九", (0, 0, 1, 2, 2, 3, 4, 5, 6, 7, 8, 9)))
+    if all(char in digits for char in text):
+        return int("".join(str(digits[char]) for char in text))
+    units = {"十": 10, "百": 100, "千": 1000}
+    total, digit, last_unit = 0, 0, 10000
+    for char in text:
+        if char in digits:
+            digit = digits[char]
+        elif char in units and units[char] < last_unit:
+            last_unit = units[char]
+            total += (digit or 1) * last_unit
+            digit = 0
+        else:
+            return None
+    return total + digit
+
+
+def _number_atom(text):
+    match = re.fullmatch(r"(" + _NUMBER + r")(?:\s*\(\s*(" + _NUMBER + r")\s*\))?", text.strip())
+    if not match:
+        return None
+    parts = [_question_integer(part) for part in match.groups() if part is not None]
+    if any(part is None for part in parts):
+        return None
+    return str(parts[0]) if len(parts) == 1 else "{}({})".format(*parts)
+
+
+def _parse_question_ids(value):
+    """Parse a complete number/list/range expression with bounded expansion."""
+    if value is None or isinstance(value, bool):
+        return []
+    if isinstance(value, (list, tuple)):
+        groups = [_parse_question_ids(item) for item in value]
+        if not all(groups):
+            return []
+        result = list(dict.fromkeys(item for group in groups for item in group))
+        if len(result) > 101:
+            raise ValueError("题号分组最多包含101项")
+        return result
+    text = _numbering_text(value)
+    while len(text) > 1 and (text[0], text[-1]) in (("(", ")"), ("[", "]")):
+        text = text[1:-1].strip()
+    text = re.sub(r"^(?:第\s*|" + _NUMBER_LABEL + r")", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s*(?:小题|题)$", "", text).strip()
+    if not re.fullmatch(_NUMBER_EXPRESSION, text):
+        return []
+    result = []
+    for part in re.split(r"[,、;]", text):
+        bounds = re.split(r"[-~至到]", part)
+        atoms = [_number_atom(item) for item in bounds]
+        if any(atom is None for atom in atoms) or len(atoms) > 2:
+            return []
+        if len(atoms) == 1:
+            result.extend(atoms)
+        else:
+            first = re.fullmatch(r"(\d+)(?:\((\d+)\))?", atoms[0])
+            last = re.fullmatch(r"(\d+)(?:\((\d+)\))?", atoms[1])
+            if first.group(2) is None and last.group(2) is None:
+                low, high = int(first.group(1)), int(last.group(1))
+                prefix = None
+            elif first.group(1) == last.group(1) and first.group(2) and last.group(2):
+                low, high = int(first.group(2)), int(last.group(2))
+                prefix = first.group(1)
+            else:
+                return []
+            if high < low or high - low > 100:
+                raise ValueError("题目范围无效：{}".format(part))
+            result.extend(str(i) if prefix is None else "{}({})".format(prefix, i) for i in range(low, high + 1))
+        if len(result) > 101:
+            raise ValueError("题号分组最多包含101项")
+    return list(dict.fromkeys(result))
+
+
+def _title_question_ids(title):
+    """Read structural labels; descriptions and embedded numeric/code literals stay intact."""
+    text = _numbering_text(title or "")
+    patterns = (
+        r"^第\s*(" + _NUMBER_EXPRESSION + r")\s*题",
+        r"^" + _NUMBER_LABEL + r"(" + _NUMBER_EXPRESSION + r")(?:\s*题)?" + _NUMBER_BOUNDARY,
+        r"^[\[(]\s*((?:第\s*)?" + _NUMBER_EXPRESSION + r"(?:\s*题)?)\s*[)\]]",
+        r"^(" + _NUMBER_EXPRESSION + r")" + _NUMBER_BOUNDARY,
+    )
+    for pattern in patterns:
+        match = re.match(pattern, text, re.IGNORECASE)
+        if match:
+            ids = _parse_question_ids(match.group(1))
+            if ids:
+                return ids
+    match = re.search(r"[\[(]\s*((?:第\s*)?" + _NUMBER_EXPRESSION + r"(?:\s*题)?)\s*[)\]]\s*$", text)
+    if match and not (match.start() and re.match(r"[A-Za-z0-9_\])]+", text[match.start() - 1])):
+        return _parse_question_ids(match.group(1))
+    match = re.search(r"(?:第\s*(" + _NUMBER_EXPRESSION + r")\s*题|" + _NUMBER_LABEL + r"(" + _NUMBER_EXPRESSION + r"))$", text, re.IGNORECASE)
+    return _parse_question_ids(match.group(1) or match.group(2)) if match else []
+
+
 def _local_question_ids(question):
-    """从题干提取答题卡题号，兼容 Scout 原生题目 ID。"""
-    title = str(question.get("title") or "")
-    ranged = _question_range(title)
-    if ranged:
-        return ranged
-    match = re.match(r"\s*(\d+)", title)
-    return [match.group(1)] if match else []
+    """Prefer explicit local-number fields, then common title conventions."""
+    for field in NUMBER_FIELDS:
+        ids = _parse_question_ids(question.get(field))
+        if ids:
+            return ids
+    return _title_question_ids(question.get("title", ""))
+
+
+def _canonical_question_id(value):
+    ids = _parse_question_ids(value)
+    return ids[0] if len(ids) == 1 else _numbering_text(value)
 
 
 def _merge_answer_values(exam, answer_values):
     answer_values = {str(key): value for key, value in (answer_values or {}).items()}
+    answer_aliases = defaultdict(list)
+    for key, value in answer_values.items():
+        answer_aliases[_canonical_question_id(key)].append((key, value))
+    entries, owners, native_owners = [], defaultdict(set), defaultdict(set)
     for section in exam["sections"]:
         for question in section["questions"]:
             ids = [str(item) for item in question.get("question_ids", [question["id"]])]
             local_ids = _local_question_ids(question)
-            resolved = {}
+            if len(local_ids) == 1 and len(ids) > 1:
+                children = [re.fullmatch(r"\d+\((\d+)\)", item) for item in ids]
+                if all(children):
+                    local_ids = ["{}({})".format(local_ids[0], child.group(1)) for child in children]
+            group_index = len(entries)
+            group = []
             for index, question_id in enumerate(ids):
-                if question_id in answer_values:
-                    resolved[question_id] = answer_values[question_id]
-                elif index < len(local_ids) and local_ids[index] in answer_values:
-                    resolved[question_id] = answer_values[local_ids[index]]
-            if resolved:
-                if len(ids) == 1:
-                    question["answer"] = _normalize_answer(resolved[ids[0]], question["type"])
-                else:
-                    question["answer"] = {key: _clean_text(value, 2000) for key, value in resolved.items()}
+                local = local_ids[index] if index < len(local_ids) else ""
+                aliases = list(dict.fromkeys([_canonical_question_id(question_id)] + ([local] if local else [])))
+                token = (group_index, index)
+                native_owners[question_id].add(token)
+                for alias in aliases:
+                    owners[alias].add(token)
+                group.append((question_id, local, aliases, token))
+            entries.append((question, group))
+    used, warnings, labels = set(), [], {}
+    counts = Counter()
+    embedded = answer_map(exam)
+    for question, group in entries:
+        resolved = {}
+        for question_id, local, aliases, token in group:
+            labels[question_id] = "{}（ID {}）".format(local, question_id) if local and local != question_id else question_id
+            if len(native_owners[question_id]) > 1:
+                warnings.append("题目ID {} 重复，请提供唯一ID".format(question_id))
+                continue
+            if question_id in answer_values:
+                resolved[question_id] = answer_values[question_id]
+                used.add(question_id)
+                expected = _normalize_answer(answer_values[question_id], question["type"])
+                for key, value in answer_aliases[_canonical_question_id(question_id)]:
+                    if _normalize_answer(value, question["type"]) == expected:
+                        used.add(key)
+                    else:
+                        warnings.append("题目ID {} 的别名答案存在差异，已采用原生ID答案，请核对".format(question_id))
+                counts["native_id"] += 1
+                continue
+            for alias in aliases:
+                candidates = answer_aliases.get(alias, [])
+                if not candidates:
+                    continue
+                if len(owners[alias]) > 1:
+                    warnings.append("题号 {} 对应多题，请使用各题的唯一题目ID".format(alias))
+                    continue
+                values = [_normalize_answer(value, question["type"]) for _, value in candidates]
+                if any(value != values[0] for value in values[1:]):
+                    warnings.append("题号 {} 的多个答案键内容冲突，请核对".format(alias))
+                    break
+                resolved[question_id] = candidates[0][1]
+                used.update(key for key, _ in candidates)
+                counts["normalized_id" if alias == aliases[0] else "local_number"] += 1
+                break
+        if resolved:
+            ids = [item[0] for item in group]
+            if len(ids) == 1:
+                question["answer"] = _normalize_answer(resolved[ids[0]], question["type"])
+            else:
+                combined = {key: embedded[key] for key in ids if key in embedded}
+                combined.update(resolved)
+                question["answer"] = {key: _clean_text(value, 2000) for key, value in combined.items()}
     flat = answer_map(exam)
+    sources = source_map(exam)
     summary = dict(exam["summary"])
     summary["answer_count"] = len(flat)
-    summary["answer_missing"] = [key for key in source_map(exam) if key not in flat]
-    return {"exam": exam, "answer_map": flat, "source_map": source_map(exam), "summary": summary}
+    summary["answer_missing"] = [key for key in sources if key not in flat]
+    summary["answer_missing_labels"] = [labels.get(key, key) for key in summary["answer_missing"]]
+    summary["answer_unmatched_keys"] = [key for key in answer_values if key not in used]
+    if summary["answer_unmatched_keys"]:
+        warnings.append("待核对应答题号：{}".format("、".join(summary["answer_unmatched_keys"])))
+    summary["answer_warnings"] = list(dict.fromkeys(warnings))
+    summary["answer_match_counts"] = dict(counts)
+    return {"exam": exam, "answer_map": flat, "source_map": sources, "summary": summary}
 
 
 def _normalize_paper_variants(exam_value, answer_value=None, answer_docx=None):
@@ -216,13 +399,9 @@ def _question_number(title, fallback):
 
 def _question_range(*values):
     for value in values:
-        match = QUESTION_RANGE_PATTERN.search(str(value or ""))
-        if not match:
-            continue
-        first, last = map(int, match.groups())
-        if last < first or last - first > 100:
-            raise ValueError("题目范围无效：{}".format(match.group(0)))
-        return [str(number) for number in range(first, last + 1)]
+        ids = _parse_question_ids(value) or _title_question_ids(value)
+        if len(ids) > 1:
+            return ids
     return []
 
 
@@ -291,14 +470,16 @@ def normalize_exam_data(value, source_name="\u8bd5\u5377"):
             except (TypeError, ValueError) as error:
                 raise ValueError("\u9898\u76ee {} \u7684 score \u9700\u8981\u662f\u6570\u5b57".format(title)) from error
             native_question_id = question.get("id")
+            local_ids = _local_question_ids(question)
             normalized_question = {
-                "id": native_question_id if native_question_id is not None else _clean_text(question.get("number") or _question_number(title, question_index + 1), 80),
+                "id": native_question_id if native_question_id is not None else _clean_text(",".join(local_ids) if local_ids else _question_number(title, question_index + 1), 80),
                 "type": question_type,
                 "title": title,
                 "score": int(score) if score.is_integer() else score,
                 "description": description,
                 "sort_order": int(question.get("sort_order", question_index) or question_index),
                 "answer": _normalize_answer(_answer_value(question), question_type),
+                **({"local_question_ids": local_ids} if local_ids else {}),
                 **({"question_ids": [str(item) for item in question["question_ids"]]} if isinstance(question.get("question_ids"), list) else {}),
                 **({key: question[key] for key in ("analysis", "explanation", "reference", "tags", "score_map", "sub_scores") if key in question}),
             }
@@ -332,7 +513,8 @@ def normalize_exam_data(value, source_name="\u8bd5\u5377"):
             if explicit:
                 question_ids = [str(item) for item in explicit]
             else:
-                inferred_range = _question_range(question_identifier, question["title"])
+                local_ids = _local_question_ids(question)
+                inferred_range = local_ids if len(local_ids) > 1 else _question_range(question_identifier)
                 single_match = re.fullmatch(r"\d+", question_identifier)
                 if inferred_range:
                     question_ids = inferred_range

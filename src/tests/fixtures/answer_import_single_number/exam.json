@@ -1,0 +1,449 @@
+[
+  {
+    "id": 25,
+    "session_id": 28,
+    "name": "一、单项选择题",
+    "description": "每题 2 分，共 30 分。",
+    "sort_order": 0,
+    "total_score": 30,
+    "questions": [
+      {
+        "id": 164,
+        "section_id": 25,
+        "type": "single",
+        "title": "1. 以下选项中，可用作 C 语言合法用户标识符的是",
+        "description": "A. _score\nB. int\nC. 3student\nD. a&b",
+        "score": 2,
+        "sort_order": 0
+      },
+      {
+        "id": 165,
+        "section_id": 25,
+        "type": "single",
+        "title": "2. printf(\"##%d%%\", 100); 运行后输出结果是",
+        "description": "A. 100%\nB. ##100%\nC. ##100%%\nD. ##%100",
+        "score": 2,
+        "sort_order": 1
+      },
+      {
+        "id": 166,
+        "section_id": 25,
+        "type": "single",
+        "title": "3. 有以下程序，运行后的输出结果是",
+        "description": "#include <stdio.h>\nint main()\n{\n    int a = 3, b = 5;\n    if (a > b);\n    printf(\"%d\", a);\n    return 0;\n}\n\nA. 3\nB. 5\nC. 35\nD. 无输出",
+        "score": 2,
+        "sort_order": 2
+      },
+      {
+        "id": 167,
+        "section_id": 25,
+        "type": "single",
+        "title": "4. 以下 for 循环的执行次数是",
+        "description": "for(int i = 0; i <= 5; i += 2)\n\nA. 2\nB. 3\nC. 4\nD. 5",
+        "score": 2,
+        "sort_order": 3
+      },
+      {
+        "id": 168,
+        "section_id": 25,
+        "type": "single",
+        "title": "5. 若有定义 int arr[10] = {1,2,3};，则以下说法正确的是",
+        "description": "A. 数组 arr 有 3 个元素\nB. 数组 arr 的初始值全为 1,2,3\nC. arr[10] 是数组的最后一个元素\nD. arr[3] 的值为 0",
+        "score": 2,
+        "sort_order": 4
+      },
+      {
+        "id": 169,
+        "section_id": 25,
+        "type": "single",
+        "title": "6. 有如下结构体定义，以下访问成员的方式正确的是",
+        "description": "struct Student\n{\n    int id;\n    char name[10];\n} s, *p = &s;\n\nA. p.id\nB. *p.id\nC. p->name\nD. s->id",
+        "score": 2,
+        "sort_order": 5
+      },
+      {
+        "id": 170,
+        "section_id": 25,
+        "type": "single",
+        "title": "7. 若有定义 int a[3][4];，按行优先存储，a[1][2] 是数组中的第几个元素",
+        "description": "A. 5\nB. 6\nC. 7\nD. 8",
+        "score": 2,
+        "sort_order": 6
+      },
+      {
+        "id": 171,
+        "section_id": 25,
+        "type": "single",
+        "title": "8. 如下程序段，输出结果是",
+        "description": "int x = 3, y = 2;\nint z = x++ + ++y;\nprintf(\"%d\", z);\n\nA. 8\nB. 7\nC. 5\nD. 6",
+        "score": 2,
+        "sort_order": 7
+      },
+      {
+        "id": 172,
+        "section_id": 25,
+        "type": "single",
+        "title": "9. 以下程序段的输出结果是",
+        "description": "int i = 5;\nwhile(i--);\nprintf(\"%d\", i);\n\nA. -1\nB. 0\nC. 5\nD. 死循环",
+        "score": 2,
+        "sort_order": 8
+      },
+      {
+        "id": 173,
+        "section_id": 25,
+        "type": "single",
+        "title": "10. 以下关于 C 语言函数的叙述，正确的是",
+        "description": "A. 函数的形参可以不指定类型\nB. 函数可以没有返回值\nC. 函数的返回值类型与 return 语句的表达式类型必须完全一致\nD. 函数可以嵌套定义",
+        "score": 2,
+        "sort_order": 9
+      },
+      {
+        "id": 174,
+        "section_id": 25,
+        "type": "single",
+        "title": "11. 若有函数调用 fun(a+b, (x,y), fun(x,y));，则该函数调用中实参的个数是",
+        "description": "A. 3\nB. 4\nC. 5\nD. 6",
+        "score": 2,
+        "sort_order": 10
+      },
+      {
+        "id": 175,
+        "section_id": 25,
+        "type": "single",
+        "title": "12. 若有定义 int a=10, *p=&a;，则以下说法正确的是",
+        "description": "A. p 中存储的是变量 a 的值\nB. &*p 等价于 a\nC. p 可以直接赋值为 100\nD. *p 等价于变量 a",
+        "score": 2,
+        "sort_order": 11
+      },
+      {
+        "id": 176,
+        "section_id": 25,
+        "type": "single",
+        "title": "13. 若有 char str[] = \"hello\";，则字符串 str 的长度和占用的字节数分别是",
+        "description": "A. 5 5\nB. 5 6\nC. 6 5\nD. 6 6",
+        "score": 2,
+        "sort_order": 12
+      },
+      {
+        "id": 177,
+        "section_id": 25,
+        "type": "single",
+        "title": "14. 若有 int arr[5] = {1,2,3,4,5}, *p = arr;，执行 p+=2 后，*p 的值为",
+        "description": "A. 1\nB. 2\nC. 3\nD. 4",
+        "score": 2,
+        "sort_order": 13
+      },
+      {
+        "id": 178,
+        "section_id": 25,
+        "type": "single",
+        "title": "15. 若有定义 int a[3][4];，以下表达式中不能表示 a[1][0] 元素地址的是",
+        "description": "A. a+1\nB. *(a+1)\nC. &a[1][0]\nD. a[1]",
+        "score": 2,
+        "sort_order": 14
+      }
+    ]
+  },
+  {
+    "id": 26,
+    "session_id": 28,
+    "name": "二、多项选择题",
+    "description": "每题 3 分，共 15 分；多选、少选、错选均不得分。",
+    "sort_order": 1,
+    "total_score": 15,
+    "questions": [
+      {
+        "id": 179,
+        "section_id": 26,
+        "type": "multiple",
+        "title": "16. 关于 C 语言的分支结构，以下说法正确的有",
+        "description": "A. switch 语句中可以没有 default 分支\nB. 多分支只能用 switch 语句实现\nC. switch 语句中 case 后的常量可以重复\nD. if 语句的 else 子句总是与离它最近、且未匹配的 if 配对",
+        "score": 3,
+        "sort_order": 0
+      },
+      {
+        "id": 180,
+        "section_id": 26,
+        "type": "multiple",
+        "title": "17. 关于 C 语言的循环结构，以下说法错误的有",
+        "description": "A. for 循环的三个表达式都可以省略\nB. break 语句只能用于循环结构中\nC. do-while 循环的循环体可以是复合语句\nD. while 循环至少会执行一次循环体",
+        "score": 3,
+        "sort_order": 1
+      },
+      {
+        "id": 181,
+        "section_id": 26,
+        "type": "multiple",
+        "title": "18. 关于 C 语言的指针运算，以下操作合法的有",
+        "description": "A. 两个同类型指针相加\nB. 两个同类型指针相减\nC. 指针加上一个整数\nD. 指针减去一个整数",
+        "score": 3,
+        "sort_order": 2
+      },
+      {
+        "id": 182,
+        "section_id": 26,
+        "type": "multiple",
+        "title": "19. 关于浮点数的相等比较，以下正确的有",
+        "description": "A. 判断两个浮点数差值的绝对值小于一个极小值\nB. 直接使用 == 比较两个浮点数\nC. 可以使用 fabs(a - b) < 1e-6 来判断浮点数 a 和 b 是否近似相等\nD. 浮点数不能进行相等比较",
+        "score": 3,
+        "sort_order": 3
+      },
+      {
+        "id": 183,
+        "section_id": 26,
+        "type": "multiple",
+        "title": "20. 以下关于链表、队列、栈的说法，正确的有",
+        "description": "A. 栈是先进后出的线性表\nB. 队列是先进先出的线性表\nC. 循环队列可以解决顺序队列的假溢出问题\nD. 单链表可以随机访问任意元素",
+        "score": 3,
+        "sort_order": 4
+      }
+    ]
+  },
+  {
+    "id": 27,
+    "session_id": 28,
+    "name": "三、判断题",
+    "description": "每题 1 分，共 10 分；正确填 T，错误填 F。",
+    "sort_order": 2,
+    "total_score": 10,
+    "questions": [
+      {
+        "id": 184,
+        "section_id": 27,
+        "type": "single",
+        "title": "21. 同类型的结构体变量之间可以直接进行整体赋值。",
+        "description": "T. 正确\nF. 错误",
+        "score": 1,
+        "sort_order": 0
+      },
+      {
+        "id": 185,
+        "section_id": 27,
+        "type": "single",
+        "title": "22. C 语言中，数组的下标从 0 开始。",
+        "description": "T. 正确\nF. 错误",
+        "score": 1,
+        "sort_order": 1
+      },
+      {
+        "id": 186,
+        "section_id": 27,
+        "type": "single",
+        "title": "23. for 循环的循环体至少会执行一次。",
+        "description": "T. 正确\nF. 错误",
+        "score": 1,
+        "sort_order": 2
+      },
+      {
+        "id": 187,
+        "section_id": 27,
+        "type": "single",
+        "title": "24. switch 语句中，每个 case 后面必须有 break 语句。",
+        "description": "T. 正确\nF. 错误",
+        "score": 1,
+        "sort_order": 3
+      },
+      {
+        "id": 188,
+        "section_id": 27,
+        "type": "single",
+        "title": "25. continue 语句的作用是结束整个循环的执行。",
+        "description": "T. 正确\nF. 错误",
+        "score": 1,
+        "sort_order": 4
+      },
+      {
+        "id": 189,
+        "section_id": 27,
+        "type": "single",
+        "title": "26. C 语言中，char 类型数据在内存中以 ASCII 码形式存储。",
+        "description": "T. 正确\nF. 错误",
+        "score": 1,
+        "sort_order": 5
+      },
+      {
+        "id": 190,
+        "section_id": 27,
+        "type": "single",
+        "title": "27. 通过初始化列表确定第一维长度的二维数组在定义时，可以省略第一维长度，但不能省略第二维长度。",
+        "description": "T. 正确\nF. 错误",
+        "score": 1,
+        "sort_order": 6
+      },
+      {
+        "id": 191,
+        "section_id": 27,
+        "type": "single",
+        "title": "28. if 语句的条件表达式只能是关系表达式或逻辑表达式。",
+        "description": "T. 正确\nF. 错误",
+        "score": 1,
+        "sort_order": 7
+      },
+      {
+        "id": 192,
+        "section_id": 27,
+        "type": "single",
+        "title": "29. 空指针就是指向地址为 0 的指针，对空指针解引用不会引发错误。",
+        "description": "T. 正确\nF. 错误",
+        "score": 1,
+        "sort_order": 8
+      },
+      {
+        "id": 193,
+        "section_id": 27,
+        "type": "single",
+        "title": "30. C 语言中，函数可以嵌套调用，也可以嵌套定义。",
+        "description": "T. 正确\nF. 错误",
+        "score": 1,
+        "sort_order": 9
+      }
+    ]
+  },
+  {
+    "id": 28,
+    "session_id": 28,
+    "name": "四、程序填空题",
+    "description": "每空 1 分，共 15 分。",
+    "sort_order": 3,
+    "total_score": 15,
+    "questions": [
+      {
+        "id": 194,
+        "section_id": 28,
+        "type": "blank",
+        "title": "A. 判断输入的字符串是否为回文串（31–33）",
+        "description": "判断输入的字符串是否为回文串（正读和反读完全一致）。请补全代码中的 31–33 三处空白。\n\n#include <stdio.h>\n#include <string.h>\nint main() {\n    char str[100];\n    scanf(\"%s\", str);\n    int len = ___31___;\n    int left = 0, right = len - 1;\n    int flag = 1;\n    while (left < right)\n    {\n        if (str[left] != str[right])\n        {\n            flag = 0;\n            ___32___;\n        }\n        left++;\n        ___33___;\n    }\n    if (flag) printf(\"是回文串\\n\");\n    else printf(\"不是回文串\\n\");\n    return 0;\n}",
+        "score": 3,
+        "sort_order": 0
+      },
+      {
+        "id": 195,
+        "section_id": 28,
+        "type": "blank",
+        "title": "B. 差分区间操作（34–36）",
+        "description": "给定长度为 n 的初始全 0 数组，进行 m 次区间操作：每次将下标区间 [l, r] 内的所有元素加上数值 v（v 可为正可为负）。请使用差分数组优化实现，最后输出数组中的最大值。数组下标从 1 开始，n ≤ 1000。补全 34–36。\n\n#include <stdio.h>\nint main()\n{\n    int n, m;\n    scanf(\"%d%d\", &n, &m);\n    int d[1005] = {0};\n    for (int i = 0; i < m; i++) {\n        int l, r, v;\n        scanf(\"%d%d%d\", &l, &r, &v);\n        d[l] += v;\n        ___34___;\n    }\n    int maxVal = -1e9, cur = 0;\n    for (int i = 1; i <= n; i++) {\n        ___35___;\n        if (cur > maxVal) {\n            ___36___;\n        }\n    }\n    printf(\"%d\", maxVal);\n    return 0;\n}",
+        "score": 3,
+        "sort_order": 1
+      },
+      {
+        "id": 196,
+        "section_id": 28,
+        "type": "blank",
+        "title": "C. 输出满足条件的整数（37–39）",
+        "description": "输出 1 到 9999 中能被 9 整除，且至少有一位数字是 3 的所有整数。请补全 37–39。\n\n#include <stdio.h>\nint main()\n{\n    int i, temp, flag;\n    // 尽可能减少循环次数\n    for (i = 9; i <= 9999; ____37____) {\n        temp = i;\n        flag = 0;\n        while (temp != 0) {\n            if (___38___) {\n                flag = 1;\n                break;\n            }\n            ___39___;\n        }\n        if (flag)\n            printf(\"%d \", i);\n    }\n    return 0;\n}",
+        "score": 3,
+        "sort_order": 2
+      },
+      {
+        "id": 197,
+        "section_id": 28,
+        "type": "blank",
+        "title": "D. 水仙花数（40–42）",
+        "description": "水仙花数是指一个 3 位数，它的每个位上的数字的 3 次幂之和等于它本身（例如：1^3 + 5^3 + 3^3 = 153）。补全 40–42，使程序输出所有水仙花数。\n\n#include <stdio.h>\nint main() {\n    int a, b, c, x;\n    for (x = 100; x < 1000; x++) {\n        a = ___40___;\n        b = ___41___;\n        c = x % 10;\n        if (x == ___42___) {\n            printf(\"%d\\n\", x);\n        }\n    }\n    return 0;\n}",
+        "score": 3,
+        "sort_order": 3
+      },
+      {
+        "id": 198,
+        "section_id": 28,
+        "type": "blank",
+        "title": "E. 冒泡排序（43–45）",
+        "description": "将数组 arr 按升序排列，加入标志位优化，若某轮无交换则提前结束。补全 43–45。\n\nvoid bubbleSort(int arr[], int n)\n{\n    for (int i = 0; i < ___43___; i++)\n    {\n        int flag = 0;\n        for (int j = 0; j < n - 1 - i; j++)\n        {\n            if (arr[j] > arr[j+1])\n            {\n                int temp = arr[j];\n                arr[j] = arr[j+1];\n                arr[j+1] = temp;\n                ___44___ = 1;\n            }\n        }\n        if (flag == 0) {\n            ___45___;\n        }\n    }\n}",
+        "score": 3,
+        "sort_order": 4
+      }
+    ]
+  },
+  {
+    "id": 29,
+    "session_id": 28,
+    "name": "五、逻辑改错题",
+    "description": "每处错误 1 分，共 15 分。回答格式：xx.（行号）________正确代码________。",
+    "sort_order": 4,
+    "total_score": 15,
+    "questions": [
+      {
+        "id": 199,
+        "section_id": 29,
+        "type": "blank",
+        "title": "A. 指针找最大值（46–48）",
+        "description": "功能：用指针找出数组中的最大值。要求保持 max 为指针类型。共 3 处错误，对应 46、47、48。\n回答格式：xx.（行号）________正确代码________\n\n1 int findMax(int *arr, int n)\n2 {\n3     int *max = arr[0];\n4     for (int i = 1; i < n; i++)\n5     {\n6         if (*(arr + i) > max)\n7         {\n8             max = arr + i;\n9         }\n10    }\n11    return max;\n12 }",
+        "score": 3,
+        "sort_order": 0
+      },
+      {
+        "id": 200,
+        "section_id": 29,
+        "type": "blank",
+        "title": "B. 斐波那契数列（49–53）",
+        "description": "功能：计算斐波那契数列第 n 项（n≥1，f(1)=1，f(2)=1）。共 5 处错误，对应 49–53。\n回答格式：xx.（行号）________正确代码________\n\n1 int fib(int n)\n2 {\n3     if (n == 1) return 0;\n4     if (n == 2) return 2;\n5     int a = 1, b = 1;\n6     for (int i = 3; i < n; i++)\n7     {\n8         int c = a - b;\n9         a = b;\n10        b = c;\n11    }\n12    return a;\n13 }",
+        "score": 5,
+        "sort_order": 1
+      },
+      {
+        "id": 201,
+        "section_id": 29,
+        "type": "blank",
+        "title": "C. 学生信息输入输出（54–56）",
+        "description": "功能：输入学生的学号（整数）和姓名（字符串），按格式输出。共 3 处错误，对应 54–56。\n回答格式：xx.（行号）________正确代码________\n\n1 #include <stdio.h>\n2 int main() {\n3     int id;\n4     char name[20];\n5     scanf(\"%d\", id);\n6     scanf(\"%s\", &name);\n7     printf(\"学号：%d，姓名：%s\\n\", id);\n8     return 0;\n9 }",
+        "score": 3,
+        "sort_order": 2
+      },
+      {
+        "id": 202,
+        "section_id": 29,
+        "type": "blank",
+        "title": "D. 奇数求和（57–58）",
+        "description": "功能：输入正整数 n，计算 1 到 n 之间所有奇数之和并输出。共 2 处错误，对应 57、58。\n回答格式：xx.（行号）________正确代码________\n\n1 #include <stdio.h>\n2 int main()\n3 {\n4     int n, sum = 0;\n5     scanf(\"%d\", &n);\n6     for (int i = 1; i <= n; i++)\n7     {\n8         if (i % 2 == 0)\n9         {\n10            sum += i;\n11        }\n12    }\n13    printf(\"%d\\n\", n);\n14    return 0;\n15 }",
+        "score": 2,
+        "sort_order": 3
+      },
+      {
+        "id": 203,
+        "section_id": 29,
+        "type": "blank",
+        "title": "E. 圆面积计算（59）",
+        "description": "功能：输入半径 r，计算圆的面积并保留两位小数输出。共 1 处错误，对应 59。\n回答格式：xx.（行号）________正确代码________\n\n1 #include <stdio.h>\n2 #define PI 3.14159\n3 int main()\n4 {\n5     int r;\n6     scanf(\"%d\", &r);\n7     int area = PI * r * r;\n8     printf(\"%.2lf\\n\", area);\n9     return 0;\n10 }",
+        "score": 1,
+        "sort_order": 4
+      },
+      {
+        "id": 204,
+        "section_id": 29,
+        "type": "blank",
+        "title": "F. 动态数组创建（60）",
+        "description": "功能：动态创建一个长度为 n 的 int 型数组，并将所有元素初始化为 0。共 1 处错误，对应 60。\n回答格式：xx.（行号）________正确代码________\n\n1 #include <stdlib.h>\n2 int* createArray(int n)\n3 {\n4     int *arr = malloc(n);\n5     for (int i = 0; i < n; i++)\n6     {\n7         arr[i] = 0;\n8     }\n9     return arr;\n10 }",
+        "score": 1,
+        "sort_order": 5
+      }
+    ]
+  },
+  {
+    "id": 30,
+    "session_id": 28,
+    "name": "六、编程问答题",
+    "description": "共两题，合计 15 分。",
+    "sort_order": 5,
+    "total_score": 15,
+    "questions": [
+      {
+        "id": 205,
+        "section_id": 30,
+        "type": "blank",
+        "title": "61–63. 反向跨步迭代器程序填空",
+        "description": "阅读背景说明并补全程序中的 61–63 三处空白。\n\nC 与 C++ 的主要区别：C 是经典的过程式语言，程序通常由函数调用组织，数据和操作分离；C++ 在 C 的基础上引入类与对象，支持封装、继承、多态等面向对象特性。\n\nSTL 是 C++ 标准模板库（Standard Template Library）的简称，常用组成包括容器、算法与迭代器。\n\n反向跨步迭代器：\n给定三个整数 l、r、step，构造并输出区间 [l,r) 中按从大到小排列的等差数列：\nr-step, r-2step, r-3step, ...\n仅输出不小于 l 的数。1 <= l < r <= 10^5，1 <= step <= r-l。\n示例：l=1、r=10、step=3 时，输出 7 4 1。\n\n#include <iostream>\nusing namespace std;\n\nclass ReverseIterator {\n    int cur;\n    int step;\npublic:\n    ReverseIterator(int cur, int step) : cur(cur), step(step) {}\n\n    int operator*() const {\n        ___61___;\n    }\n\n    ReverseIterator& operator++() {\n        ___62___;\n    }\n\n    bool operator!=(const ReverseIterator& other) const {\n        ___63___;\n    }\n};\n\nclass ReverseRange {\n    int l, r, step;\npublic:\n    ReverseRange(int l, int r, int step) : l(l), r(r), step(step) {}\n\n    ReverseIterator begin() const {\n        return ReverseIterator(r - step, step);\n    }\n\n    ReverseIterator end() const {\n        return ReverseIterator(l, step);\n    }\n};\n\nint main() {\n    int l, r, step;\n    cin >> l >> r >> step;\n    for (int x : ReverseRange(l, r, step)) {\n        cout << x << \" \";\n    }\n    cout << \"\\n\";\n    return 0;\n}",
+        "score": 9,
+        "sort_order": 0
+      },
+      {
+        "id": 206,
+        "section_id": 30,
+        "type": "essay",
+        "title": "64. 加权价值字符串构造",
+        "description": "定义字符 c 的价值为 f(c) = c - 'a'，即 f('a') = 0, f('b') = 1, …, f('z') = 25。\n\n定义长度为 n 的字符串 s 的加权价值为：\ng(s) = Σ(i=1 至 n) i × f(s_i)\n其中下标 i 从 1 开始计数。\n\n给出目标长度 n 和目标价值 S，请构造一个长度为 n 且 g(s) = S 的字符串。若存在多个合法字符串，输出字典序最小的一个；若不存在合法字符串，输出 -1。\n\n可使用 C / C++，无需考虑精度问题。\n\n输入格式：\n输入一行两个整数 n 和 S。\n\n输出格式：\n输出满足条件的字典序最小字符串；若无解则输出 -1。\n\n输入样例：\n4 20\n\n输出样例：\naaaf\n\n请用文字描述简要思路，并写出实现该题的 C / C++ 代码。",
+        "score": 6,
+        "sort_order": 1
+      }
+    ]
+  }
+]
