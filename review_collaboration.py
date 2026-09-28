@@ -156,7 +156,10 @@ def check_decisions(payload, review):
             if question not in snapshot["questions"][kind] or question in seen:
                 raise ValueError("复核题号无效或重复")
             seen.add(question)
-            if decision.get("status", "") not in (None, "", "通过", "不通过", "待复核"):
+            allowed_statuses = (None, "", "通过", "不通过", "待复核")
+            if kind == "subjective" and question == "64":
+                allowed_statuses += ("部分得分",)
+            if decision.get("status", "") not in allowed_statuses:
                 raise ValueError("复核结论无效")
             expected = decision.get("expected_revision")
             if expected is None:

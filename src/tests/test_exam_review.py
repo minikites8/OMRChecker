@@ -155,7 +155,7 @@ def test_review_ui_is_connected():
     javascript = scan_ui.UI_ROOT.joinpath("app.js").read_text(encoding="utf-8")
     assert "自动判断与人工复核" in html
     assert "/api/review" in javascript
-    assert "保存复核结果" in html
+    assert 'id="reviewSaveStatus"' in html
     assert "客观题复核" in html
     assert 'id="reviewObjectiveSummary"' in html
     assert "objective_decisions" in scan_ui.UI_ROOT.joinpath("collaboration.js").read_text(encoding="utf-8")

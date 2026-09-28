@@ -191,7 +191,7 @@
   });
   document.addEventListener('click', event => { const menu = $('reviewMoreActions'); if (menu.open && (!menu.contains(event.target) || event.target.closest('button,a'))) menu.open = false; });
   window.addEventListener('beforeunload', event => {
-    if (typeof workspaceReview !== 'undefined' && workspaceReview.hasDraft(reviewState)) { event.preventDefault(); event.returnValue = ''; }
+    if (typeof workspaceReview !== 'undefined' && (workspaceReview.hasDraft(reviewState) || window.reviewAutosave?.hasPending())) { event.preventDefault(); event.returnValue = ''; }
   });
   settingsSummary(); renderQueue(); updatePending();
 })();

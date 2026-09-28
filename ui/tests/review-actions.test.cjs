@@ -2,11 +2,11 @@ const test=require('node:test'),assert=require('node:assert/strict'),fs=require(
 const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
 const source=fs.readFileSync(path.join(__dirname,'../app.js'),'utf8');
 const footer=html.match(/<div class="builder-actions review-actions workflow-review-actions">([\s\S]*?)\n        <\/div>/)?.[1]||'';
-test('review footer exposes only AI judgment and confirmation buttons',()=>{
- assert.ok(footer);assert.deepEqual([...footer.matchAll(/<button\b[^>]*\bid="([^"]+)"/g)].map(m=>m[1]),['reviewAiButton','reviewConfirmGradeButton']);assert.doesNotMatch(footer,/<details\b|<summary\b|<a\b/);
+test('review footer keeps primary actions and a hidden save-retry control',()=>{
+ assert.ok(footer);assert.deepEqual([...footer.matchAll(/<button\b[^>]*\bid="([^"]+)"/g)].map(m=>m[1]),['reviewAutosaveRetry','reviewAiButton','reviewConfirmGradeButton']);assert.match(footer,/id="reviewAutosaveRetry"[^>]*hidden/);assert.doesNotMatch(footer,/<details\b|<summary\b|<a\b/);
 });
 test('footer labels are AI judgment and confirm results',()=>{
- assert.match(footer,/id="reviewAiButton"[^>]*><span>AI判断<\/span>/);assert.match(footer,/id="reviewConfirmGradeButton"[^>]*><span>确认结果<\/span>/);assert.match(footer,/确认结果时会自动保存/);
+ assert.match(footer,/id="reviewAiButton"[^>]*><span>AI判断<\/span>/);assert.match(footer,/id="reviewConfirmGradeButton"[^>]*><span>确认结果<\/span>/);assert.match(footer,/修改结果后自动保存/);
 });
 test('legacy save export and deletion hooks stay hidden outside the footer',()=>{
  const auxiliary=html.match(/<div id="reviewAuxiliaryActions" hidden>([\s\S]*?)\n        <\/div>/)?.[1]||'';

@@ -353,11 +353,26 @@
   });
   window.addEventListener('platform:ready', () => { model.ready = true; renderRecords(); loadReviewHistory(); });
   $('reviewResults').addEventListener('input', event => {
-    if (!event.target.matches('input,select') || !event.target.closest('.review-controls,.objective-controls')) return;
-    model.dirty = true; $('reviewSaveStatus').textContent = '修改待保存';
+    if (!event.target.matches('input,select,button.review-verdict-button') || !event.target.closest('.review-controls,.objective-controls')) return;
+    model.dirty = true; $('reviewSaveStatus').textContent = '修改后自动保存…';
+  });
+  window.addEventListener('platform:autosave', event => {
+    const {status, reviewId, error} = event.detail;
+    if (model.current?.review_id !== reviewId) return;
+    const messages = {ready:'修改后自动保存', pending:'修改后自动保存…', saving:'正在自动保存…',
+      saved:'已自动保存', invalid:'请填写有效得分，完成后自动保存',
+      conflict:'同一题已被更新，修改已保留，请查看最新版本后重试',
+      error:'自动保存失败，修改已保留；请检查连接后重试保存'};
+    model.dirty = !['ready','saved'].includes(status);
+    $('reviewSaveStatus').textContent = messages[status] || '';
+    $('reviewSaveStatus').dataset.state = status;
+    $('reviewSaveStatus').title = error?.message || '';
+    $('reviewAutosaveRetry').hidden = status !== 'error';
   });
   window.addEventListener('platform:saved', () => {
-    model.dirty = false; $('reviewSaveStatus').textContent = '复核结果已保存'; toast('复核结果已保存，成绩已更新。');
+    model.dirty = Boolean(window.reviewAutosave?.hasPending());
+    $('reviewSaveStatus').textContent = model.dirty ? '修改后自动保存…' : '复核结果已保存';
+    if (!model.dirty) toast('复核结果已保存，成绩已更新。');
   });
   $('reviewCardFiles').addEventListener('change', () => {
     const files = Array.from($('reviewCardFiles').files || []), groups = groupReviewFiles(files);

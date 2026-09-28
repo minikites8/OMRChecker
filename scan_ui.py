@@ -781,10 +781,60 @@ def _ensure_review_scores(review):
     return refresh_rule_judgments(review) or changed
 
 
+def _ensure_review_display_crops(review, review_path):
+    """Backfill expanded scan previews while retaining recognition and grading data."""
+    from exam_review import DISPLAY_CROP_PADDING_PT, regenerate_display_crops
+    padding = {"x": DISPLAY_CROP_PADDING_PT[0], "y": DISPLAY_CROP_PADDING_PT[1]}
+    adjustments = review.get("crop_adjustments") or {}
+    if adjustments.get("display_padding_pt") == padding:
+        return False
+    items = review.get("items") or []
+    if not any(item.get("handwriting_urls") for item in items):
+        return False
+    cache = review.get("subjective_display") or {}
+    cached_urls = [url for item in items for url in item.get("handwriting_display_urls", [])]
+    if cache.get("version") == 1 and cache.get("padding_pt") == padding and cached_urls:
+        if all(url.startswith("/reviews/") and
+               resolve_under(REVIEW_ROOT, unquote(url[9:])).is_file() for url in cached_urls):
+            return False
+    input_dir = review_path.parent.parent / "input"
+    if not input_dir.is_dir():
+        return False
+    names = review.get("card_files") or []
+    files = [resolve_under(input_dir, name) for name in names] if names else sorted(
+        path for path in input_dir.iterdir() if path.suffix.lower() in ALLOWED_EXTENSIONS)
+    if not files or any(not path.is_file() for path in files):
+        return False
+    destination = review_path.parent / "handwriting" / "display_v1"
+    try:
+        paths = regenerate_display_crops(files, destination, adjustments)
+        PLATFORM_PERSISTENCE.sync_tree(
+            destination, "review", str(review.get("owner_user_id") or ""),
+            relative_prefix=destination.resolve().relative_to(REVIEW_ROOT.resolve()))
+    except Exception as error:
+        print("[试卷复核] 扩展扫描图暂时生成失败：{}".format(error), flush=True)
+        return False
+    updated = False
+    review_id = review.get("review_id") or review_path.parent.parent.name
+    for item in items:
+        question = str(item.get("question", ""))
+        labels = ["64思路", "64代码"] if question == "64" else [question]
+        urls = ["/reviews/{}/output/handwriting/display_v1/{}".format(
+            review_id, Path(paths[label]).name) for label in labels if label in paths]
+        if urls:
+            item["handwriting_display_urls"] = urls
+            updated = True
+    if updated:
+        review["subjective_display"] = {"version": 1, "padding_pt": padding}
+    return updated
+
+
 def read_review_status(review_id):
     with AI_REVIEW_LOCK:
         clean_id, path, review = _load_review(review_id)
-        if _ensure_review_scores(review):
+        changed = _ensure_review_scores(review)
+        changed = _ensure_review_display_crops(review, path) or changed
+        if changed:
             _write_review(path, review)
     review["report_url"] = "/reviews/{}/output/review.json".format(clean_id)
     return review

@@ -62,7 +62,7 @@ function reviewFilePayload(file){return new Promise(function(resolve,reject){con
 async function readReviewResponse(response){const text=await response.text();let result={};try{result=text?JSON.parse(text):{}}catch(error){result={ok:false,error:'服务器返回了无效响应（HTTP '+response.status+'）'}}if(!response.ok||result.ok===false){const message=result.error||result.detail||('复核服务请求失败（HTTP '+response.status+'）');const failure=new Error(message);failure.status=response.status;failure.logTail=result.log_tail||'';throw failure}return result}
 function groupReviewFiles(files){const groups=[],images=[];function flushImages(){while(images.length){const chunk=images.splice(0,2);groups.push({label:'第'+(groups.length+1)+'份照片',files:chunk})}}files.forEach(function(file){if(file.name.toLowerCase().endsWith('.pdf')){flushImages();groups.push({label:file.name.replace(/\.pdf$/i,''),files:[file]})}else{images.push(file)}});flushImages();return groups}
 function stopBatchPolling(){if(reviewState.batchTimer){clearInterval(reviewState.batchTimer);reviewState.batchTimer=null}}
-async function loadBatchReview(reviewId,showResult=true){if(!reviewId||window.reviewDeletion?.isDeleted(reviewId))return;if(showResult&&reviewId!==reviewState.reviewId&&!window.platform.confirmSwitch())return;try{const response=await fetch('/api/review/status?review_id='+encodeURIComponent(reviewId));const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'读取批改结果失败');if(window.reviewDeletion?.isDeleted(reviewId))return;if(result.import_id&&result.import_id!==reviewState.importId){reviewState.importId=result.import_id;reviewEl.importSelect.value=result.import_id;await loadReviewScoreMap(result.import_id)}renderReview(result,false);if(showResult)window.platform.navigate('results');reviewState.batchLoaded=true;if(result.ai_judgment&&result.ai_judgment.status==='处理中')startReviewPolling()}catch(error){showError(error.message)}}
+async function loadBatchReview(reviewId,showResult=true){if(!reviewId||window.reviewDeletion?.isDeleted(reviewId))return;if(showResult&&reviewId!==reviewState.reviewId){if(window.reviewAutosave){if(!await window.reviewAutosave.flush())return;}else if(!window.platform.confirmSwitch())return;}try{const response=await fetch('/api/review/status?review_id='+encodeURIComponent(reviewId));const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'读取批改结果失败');if(window.reviewDeletion?.isDeleted(reviewId))return;if(result.import_id&&result.import_id!==reviewState.importId){reviewState.importId=result.import_id;reviewEl.importSelect.value=result.import_id;await loadReviewScoreMap(result.import_id)}renderReview(result,false);if(showResult)window.platform.navigate('results');reviewState.batchLoaded=true;if(result.ai_judgment&&result.ai_judgment.status==='处理中')startReviewPolling()}catch(error){showError(error.message)}}
 function renderBatchStatus(batch){const originalEntries=batch.reviews||[];const keptEntries=originalEntries.filter(entry=>!window.reviewDeletion?.isDeleted(entry.review_id));if(keptEntries.length!==originalEntries.length)batch={...batch,reviews:keptEntries,total:keptEntries.length,completed:keptEntries.filter(entry=>entry.status==='已完成').length,failed:keptEntries.filter(entry=>entry.status==='失败').length};window.dispatchEvent(new CustomEvent('platform:batch',{detail:batch}));reviewEl.batchPanel.classList.remove('hidden');const done=(Number(batch.completed)||0)+(Number(batch.failed)||0),total=Number(batch.total)||0;reviewEl.batchSummary.textContent=(batch.phase||batch.status||'处理中')+' · 并发 '+(batch.concurrency||1)+' 份'+(batch.duration_seconds?' · '+batch.duration_seconds+' 秒':'');reviewEl.batchProgress.textContent=done+' / '+total;reviewEl.batchList.replaceChildren();let firstReady='';(batch.reviews||[]).forEach(function(entry,index){const button=document.createElement('button');button.type='button';button.dataset.reviewId=entry.review_id||'';button.className='batch-review-card '+(entry.status==='失败'?'failed':entry.review_id?'':'processing')+(entry.review_id===reviewState.reviewId?' selected':'');const title=document.createElement('strong');title.textContent=entry.label||('第'+(index+1)+'份');const detail=document.createElement('span');if(entry.status==='失败'){detail.textContent='失败：'+(entry.error||'处理异常')}else if(entry.review_id){const score=entry.score_summary||{},ai=entry.ai_judgment||{};detail.textContent=(entry.student_name?entry.student_name+' · ':'')+(entry.student_id||'学号待识别')+' · '+formatScore(score.total_score)+' / '+formatScore(score.possible_score)+' · '+(ai.status||'规则完成');if(!firstReady)firstReady=entry.review_id;button.addEventListener('click',function(){loadBatchReview(entry.review_id)})}else{detail.textContent=entry.status||'等待中'}button.append(title,detail);reviewEl.batchList.append(button)});if(firstReady&&!reviewState.batchLoaded)loadBatchReview(firstReady,false)}
 function acceptReviewTask(result){
   if(!result.batch_id)return false;
@@ -111,13 +111,76 @@ function reviewStatusClass(status){return status==='自动通过'||status==='AI�
 function formatScore(value){const number=Math.round((Number(value)||0)*100)/100;return Number.isInteger(number)?String(number):number.toFixed(2).replace(/0+$/,'').replace(/\.$/,'')}
 function normalizeObjectiveAnswer(question,value){let answer=String(value||'').toUpperCase().replace(/\s+/g,'');const number=Number(question);if(number>=16&&number<=20)answer=Array.from(new Set(answer.split(''))).sort().join('');if(number>=21&&number<=30){if(['对','正确','TRUE'].includes(answer))answer='T';if(['错','错误','FALSE'].includes(answer))answer='F'}return answer}
 function objectiveLocalStatus(item){if(item.manual_status)return item.manual_status;if(item.override_answer){const answer=normalizeObjectiveAnswer(item.question,item.reviewed_answer),expected=normalizeObjectiveAnswer(item.question,item.expected);return expected?(answer===expected?'通过':'不通过'):'待复核'}return item.auto_status||'待复核'}
-function textLocalStatus(item){if(['通过','不通过'].includes(item.manual_status))return item.manual_status;const ai=item.ai_status,raw=item.ai_score,score=Number(raw),max=Number(item.score);if(['AI通过','AI不通过','AI部分得分'].includes(ai)&&raw!==null&&raw!==undefined){if(!['number','string'].includes(typeof raw)||String(raw).trim()===''||!Number.isFinite(score)||!Number.isFinite(max)||max<0||score<0||score>max)return'待复核';return score===max?'通过':score===0?'不通过':'部分得分'}if(ai==='AI通过')return'通过';if(ai==='AI不通过')return'不通过';if(['AI需复核','AI部分得分'].includes(ai))return'待复核';return item.auto_status||'待复核'}
-function textLocalScore(item){const status=textLocalStatus(item);if(status==='部分得分')return Number(item.ai_score);return ['自动通过','通过'].includes(status)?Number(item.score)||0:0}
+function textLocalStatus(item){if(String(item.question)==='64'&&item.manual_score!==null&&item.manual_score!==undefined){const raw=item.manual_score,points=Number(raw),max=Number(item.score);if(!['number','string'].includes(typeof raw)||String(raw).trim()===''||!Number.isFinite(points)||!Number.isFinite(max)||max<0||points<0||points>max)return'待复核';return points===max?'通过':points===0?'不通过':'部分得分'}if(['通过','不通过'].includes(item.manual_status))return item.manual_status;const ai=item.ai_status,raw=item.ai_score,score=Number(raw),max=Number(item.score);if(['AI通过','AI不通过','AI部分得分'].includes(ai)&&raw!==null&&raw!==undefined){if(!['number','string'].includes(typeof raw)||String(raw).trim()===''||!Number.isFinite(score)||!Number.isFinite(max)||max<0||score<0||score>max)return'待复核';return score===max?'通过':score===0?'不通过':'部分得分'}if(ai==='AI通过')return'通过';if(ai==='AI不通过')return'不通过';if(['AI需复核','AI部分得分'].includes(ai))return'待复核';return item.auto_status||'待复核'}
+function textLocalScore(item){const status=textLocalStatus(item);if(String(item.question)==='64'&&item.manual_score!==null&&item.manual_score!==undefined)return ['通过','不通过','部分得分'].includes(status)?Number(item.manual_score):0;if(status==='部分得分')return Number(item.ai_score);return ['自动通过','通过'].includes(status)?Number(item.score)||0:0}
 function calculateLocalScore(){let objective=0,objectivePossible=0,text=0,textPossible=0,pending=0,pendingCount=0;const pass=new Set(['自动通过','通过']),fail=new Set(['不通过']);reviewState.objective.forEach(function(item){const score=Number(item.score)||0,status=objectiveLocalStatus(item);objectivePossible+=score;if(pass.has(status))objective+=score;else if(!fail.has(status)){pending+=score;pendingCount++}});reviewState.items.forEach(function(item){const score=Number(item.score)||0,status=textLocalStatus(item);textPossible+=score;if(pass.has(status)||status==='部分得分')text+=textLocalScore(item);else if(!fail.has(status)){pending+=score;pendingCount++}});const localPossible=objectivePossible+textPossible;if(localPossible===0&&Number(reviewState.scoreSummary.possible_score)>0)return Object.assign({},reviewState.scoreSummary,{pending_count:1});return{total_score:objective+text,possible_score:localPossible,objective_score:objective,objective_possible:objectivePossible,text_score:text,text_possible:textPossible,pending_score:pending,pending_count:pendingCount}}
 function renderScoreBoard(){const score=calculateLocalScore();window.dispatchEvent(new CustomEvent('platform:score',{detail:score}));reviewEl.totalScore.textContent=formatScore(score.total_score)+' / '+formatScore(score.possible_score);reviewEl.objectiveScore.textContent=formatScore(score.objective_score)+' / '+formatScore(score.objective_possible);reviewEl.textScore.textContent=formatScore(score.text_score)+' / '+formatScore(score.text_possible);reviewEl.pendingScore.textContent=formatScore(score.pending_score)+' 分';reviewEl.confirmGrade.disabled=reviewState.running||Object.keys(reviewState.aiQuestionBusy).length>0||!reviewState.reviewId||score.pending_count>0||reviewState.gradeConfirmed;reviewEl.confirmGrade.firstElementChild.textContent=reviewState.gradeConfirmed?'结果已确认':'确认结果';reviewEl.save.disabled=reviewState.gradeConfirmed||reviewState.running||Object.keys(reviewState.aiQuestionBusy).length>0}
 function objectiveNeedsReview(item){return item.auto_status!=='自动通过'||Boolean(item.override_answer)||Boolean(item.manual_status)}
 function objectiveRecognitionLabel(item){const warning=String(item.recognition_warning||'');if(warning.includes('多处填涂'))return '多处填涂';if(warning)return item.recognized_label||'无法确定';if(item.recognized)return item.recognized;if(item.recognized_label)return item.recognized_label;return '空白'}
 function objectiveFinalLabel(item){if(item.override_answer)return item.reviewed_answer||'空白';if(item.recognition_warning)return '待人工确认';return item.recognized||'空白'}
+function createReviewDecisionButtons(item, onChange) {
+  const group = document.createElement('div'); group.className = 'review-verdict-buttons';
+  group.setAttribute('role', 'group'); group.setAttribute('aria-label', '第' + item.question + '题复核结论');
+  const buttons = [];
+  group.updateState = function () {
+    buttons.forEach(button => button.setAttribute('aria-pressed', String(item.manual_status === button.dataset.reviewStatus)));
+  };
+  [['不通过', '不正确', 'incorrect'], ['通过', '正确', 'correct']].forEach(function ([status, label, className]) {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'review-verdict-button ' + className;
+    button.textContent = label; button.dataset.reviewStatus = status; button.setAttribute('aria-label', '第' + item.question + '题' + label);
+    button.addEventListener('click', function () {
+      item.manual_status = status;
+      if (String(item.question) === '64') {
+        const maximum = Number(item.score);
+        if (Number.isFinite(maximum) && maximum > 0) item.manual_score = status === '通过' ? maximum : 0;
+        else delete item.manual_score;
+      }
+      group.updateState(); onChange();
+      button.dispatchEvent(new Event('input', {bubbles: true}));
+    });
+    buttons.push(button); group.append(button);
+  });
+  group.updateState(); return group;
+}
+function createSubjectiveControls(item, onChange) {
+  const controls = document.createElement('div'); controls.className = 'review-controls';
+  let scoreInput = null;
+  const buttons = createReviewDecisionButtons(item, function () {
+    if (scoreInput) {
+      scoreInput.value = item.manual_score ?? ''; scoreInput.setCustomValidity(''); scoreInput.removeAttribute('aria-invalid');
+    }
+    onChange();
+  });
+  controls.append(buttons);
+  if (String(item.question) === '64') {
+    controls.classList.add('has-manual-score');
+    const maximum = Number(item.score), label = document.createElement('label'); label.className = 'review-manual-score';
+    label.append(document.createTextNode('得分'));
+    scoreInput = document.createElement('input'); scoreInput.type = 'number'; scoreInput.className = 'review-manual-score-input';
+    scoreInput.min = '0'; scoreInput.max = String(maximum); scoreInput.step = 'any'; scoreInput.inputMode = 'decimal';
+    scoreInput.disabled = !Number.isFinite(maximum) || maximum <= 0;
+    scoreInput.setAttribute('aria-label', '第64题得分'); scoreInput.placeholder = '0–' + maximum;
+    scoreInput.value = ['通过','不通过','自动通过','部分得分'].includes(textLocalStatus(item)) ? textLocalScore(item) : '';
+    scoreInput.addEventListener('input', function () {
+      const raw = scoreInput.value, points = Number(raw);
+      if (scoreInput.validity.badInput || (raw !== '' && (!Number.isFinite(points) || points < 0 || points > maximum))) {
+        scoreInput.setCustomValidity('请输入0到' + maximum + '之间的得分'); scoreInput.setAttribute('aria-invalid', 'true'); return;
+      }
+      scoreInput.setCustomValidity(''); scoreInput.removeAttribute('aria-invalid');
+      if (raw === '') { delete item.manual_score; item.manual_status = '待复核'; }
+      else { item.manual_score = points; item.manual_status = points === maximum ? '通过' : points === 0 ? '不通过' : '部分得分'; }
+      buttons.updateState(); onChange();
+    });
+    scoreInput.addEventListener('change', function () { if (!scoreInput.checkValidity()) scoreInput.reportValidity(); });
+    scoreInput.addEventListener('blur', function () { if (scoreInput.checkValidity()) queueMicrotask(onChange); });
+    const maximumLabel = document.createElement('span'); maximumLabel.className = 'review-score-limit'; maximumLabel.textContent = '/ ' + maximum + ' 分';
+    label.append(scoreInput, maximumLabel); controls.append(label);
+  }
+  const input = document.createElement('input'); input.type = 'text'; input.className = 'manual-answer-input';
+  input.setAttribute('aria-label', '第' + item.question + '题人工修正答案'); input.placeholder = '人工修正后的答案'; input.value = item.manual_text || '';
+  input.addEventListener('input', function () { item.manual_text = input.value; });
+  controls.append(input); return controls;
+}
 function renderObjective(){
   reviewEl.objective.replaceChildren();
   const summary=reviewState.objectiveSummary||{};
@@ -155,11 +218,10 @@ function renderObjective(){
       const controls=document.createElement('div');controls.className='objective-controls';
       const overrideLabel=document.createElement('label');const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=Boolean(item.override_answer);checkbox.setAttribute('aria-label','修正第'+item.question+'题识别结果');overrideLabel.append(checkbox,document.createTextNode('修正识别'));
       const input=document.createElement('input');input.type='text';input.maxLength=4;input.placeholder=Number(item.question)<=15?'A-D':Number(item.question)<=20?'ABCD':'T/F';input.setAttribute('aria-label','第'+item.question+'题修正答案');input.value=item.reviewed_answer||'';input.disabled=!checkbox.checked;
-      const select=document.createElement('select');select.setAttribute('aria-label','第'+item.question+'题复核结论');[['','按答案自动判断'],['通过','通过'],['不通过','不通过'],['待复核','待复核']].forEach(function(entry){const option=document.createElement('option');option.value=entry[0];option.textContent=entry[1];select.append(option)});select.value=item.manual_status||'';
+      const buttons=createReviewDecisionButtons(item,function(){updateFinal();renderScoreBoard()});
       checkbox.addEventListener('change',function(){item.override_answer=checkbox.checked;input.disabled=!checkbox.checked;if(!checkbox.checked){item.reviewed_answer='';input.value=''}else{input.focus()}updateFinal();renderScoreBoard()});
       input.addEventListener('input',function(){item.reviewed_answer=input.value.toUpperCase().replace(/\s+/g,'');input.value=item.reviewed_answer;updateFinal();renderScoreBoard()});
-      select.addEventListener('change',function(){item.manual_status=select.value;updateFinal();renderScoreBoard()});
-      controls.append(overrideLabel,input,select);box.append(controls);
+      controls.append(overrideLabel,input,buttons);box.append(controls);
     }
     updateFinal();reviewEl.objective.append(box);
   });
@@ -174,29 +236,73 @@ function renderWorkspaceStatus(message) {
   document.querySelector('#workspaceCollaborationStatus').textContent = message ||
     ('共享阅卷工作区 · 多人协作已启用' + (actor ? ' · 最近操作：' + actor + ' · ' + time : ''));
 }
-async function saveWorkspaceReview(forConfirmation = false) {
+async function saveWorkspaceReview(forConfirmation = false, automatic = false) {
+  const invalidScore = reviewEl.results.querySelector('.review-manual-score-input:invalid');
+  if (invalidScore) { invalidScore.reportValidity(); throw new Error('请先填写第64题的有效得分'); }
   const payload = workspaceReview.pending(reviewState, forConfirmation);
   const submitted = workspaceReview.capture(reviewState);
   const response = await fetch('/api/review/confirm', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
   const result = await readReviewResponse(response);
+  if (automatic) await waitForReviewComposition();
   if (payload.review_id !== reviewState.reviewId) throw new Error('已切换试卷，保存结果已留在原试卷');
+  if (window.reviewDeletion?.isDeleted(payload.review_id)) return result;
+  const restoreFocus = automatic ? window.ReviewAutosave.captureFocus(reviewEl.results) : () => {};
   renderReview(result, false, submitted);
+  restoreFocus();
   return result;
 }
+let reviewComposing = false, compositionWaiters = [], autosaveReviewId = '';
+function waitForReviewComposition() {
+  return reviewComposing ? new Promise(resolve => compositionWaiters.push(resolve)) : Promise.resolve();
+}
+const reviewAutosave = window.reviewAutosave = window.ReviewAutosave.createController({
+  getReviewId: () => reviewState.reviewId,
+  hasDraft: () => workspaceReview.hasDraft(reviewState),
+  isValid: () => !reviewEl.results.querySelector('.review-manual-score-input:invalid'),
+  isBusy: () => workspaceBusy || reviewComposing || reviewState.running,
+  async save() {
+    workspaceBusy = true; reviewEl.save.disabled = true; reviewEl.confirmGrade.disabled = true;
+    try { await saveWorkspaceReview(false, true); }
+    finally { workspaceBusy = false; reviewEl.save.disabled = false; renderScoreBoard(); }
+  },
+  onState(detail) {
+    window.dispatchEvent(new CustomEvent('platform:autosave', {detail}));
+    if (detail.error) renderWorkspaceStatus(detail.error.message + '；当前填写内容已保留。');
+  }
+});
+function isReviewEdit(event) {
+  return event.target.matches('input,textarea,select,button.review-verdict-button') &&
+    event.target.closest('.review-controls,.objective-controls');
+}
+['input','change'].forEach(type => reviewEl.results.addEventListener(type, event => {
+  if (isReviewEdit(event) && !event.isComposing && !reviewComposing) reviewAutosave.schedule();
+}));
+reviewEl.results.addEventListener('compositionstart', event => { if (isReviewEdit(event)) reviewComposing = true; });
+reviewEl.results.addEventListener('compositionend', event => {
+  if (!isReviewEdit(event)) return;
+  reviewComposing = false; compositionWaiters.splice(0).forEach(resolve => resolve()); reviewAutosave.schedule();
+});
+window.addEventListener('online', () => { if (reviewAutosave.status === 'error') reviewAutosave.schedule(); });
+document.querySelector('#reviewAutosaveRetry').addEventListener('click', () => { void reviewAutosave.flush(); });
+window.addEventListener('platform:review', event => {
+  if (autosaveReviewId !== event.detail.result.review_id) {
+    autosaveReviewId = event.detail.result.review_id; reviewAutosave.reset();
+    window.dispatchEvent(new CustomEvent('platform:autosave', {detail: {status:'ready',reviewId:autosaveReviewId,dirty:false}}));
+  }
+});
+window.addEventListener('platform:selection', () => {
+  autosaveReviewId = ''; reviewAutosave.reset(); reviewComposing = false;
+  compositionWaiters.splice(0).forEach(resolve => resolve());
+});
 reviewEl.save.addEventListener('click', async function () {
-  if (!reviewState.reviewId || workspaceBusy) return;
-  workspaceBusy = true; reviewEl.save.disabled = true; reviewEl.confirmGrade.disabled = true;
-  try {
-    await saveWorkspaceReview();
+  if (!reviewState.reviewId) return;
+  if (await reviewAutosave.flush()) {
     reviewEl.status.textContent = '复核结果已保存到共享工作区。';
     window.dispatchEvent(new CustomEvent('platform:saved'));
-  } catch (error) {
-    renderWorkspaceStatus(error.message + '；当前填写内容已保留。');
-    reviewEl.status.textContent = error.message; showError(error.message);
-  } finally {workspaceBusy = false; reviewEl.save.disabled = false; renderScoreBoard();}
+  }
 });
 
-function renderReview(result,scrollToTop=true,submitted){result=workspaceReview.receive(result,reviewState,submitted);if(window.reviewDeletion?.isDeleted(result.review_id))return;document.querySelector('#reviewDeletionStatus').textContent='';if(result.review_id)localStorage.setItem('omrActiveReviewId',result.review_id);reviewEl.results.dataset.recognitionMode=result.recognition_mode||'local_ocr_ai';reviewState.reviewId=result.review_id;reviewState.gradeConfirmed=Boolean(result.grade_confirmed)&&!workspaceReview.hasDraft(result);reviewState.items=result.items||[];reviewState.objective=result.objective||[];applyImportedScores();reviewState.objectiveSummary=result.objective_summary||{};reviewState.scoreSummary=result.score_summary||{};reviewEl.results.classList.remove('hidden');const s=result.review_summary||{};const ai=result.ai_judgment||{};const singleAi=result.ai_question_judgment||{};if(singleAi.status&&singleAi.status!=='处理中'&&singleAi.question)delete reviewState.aiQuestionBusy[String(singleAi.question)];reviewEl.results.setAttribute('aria-label',result.local_ocr_enabled===false?'仅 AI 识别批改结果':'本地 OCR 与 AI 批改结果');reviewEl.paperType.textContent='试卷类型：'+(result.paper_type||'待识别')+(result.paper_type_status?'（'+result.paper_type_status+'）':'')+(result.answer_selection_status?' · '+result.answer_selection_status:'');reviewEl.summary.textContent='姓名 '+(result.student_name||'待识别')+' · 学号 '+(result.student_id||'待识别')+'；填空与材料题 '+(s.total||0)+' 项，规则自动通过 '+(s.auto_pass||0)+' 项，AI通过 '+(s.ai_pass||0)+' 项，AI部分得分 '+(s.ai_partial||0)+' 项，AI复核 '+(s.ai_review||0)+' 项；客观题最终通过 '+(reviewState.objectiveSummary.final_pass||0)+'/'+reviewState.objective.length+'；AI状态：'+(ai.status||'待运行')+(ai.group_count?'；大题分组 '+ai.group_count+' 组':'')+(ai.message?'（'+ai.message+'）':'')+(result.ocr_errors&&result.ocr_errors.length?'；文字识别提示：'+result.ocr_errors.join('；'):'');renderObjective();reviewEl.items.replaceChildren();reviewState.items.forEach(function(item){const card=document.createElement('article');card.className='review-item';const header=document.createElement('header');const title=document.createElement('strong');title.textContent='第'+item.question+'题'+(Number(item.score)>0?' · '+formatScore(item.score)+'分':'');const badge=document.createElement('span');badge.className='review-status '+reviewStatusClass(item.auto_status);badge.textContent=item.auto_status;const aiBadge=document.createElement('span');aiBadge.className='review-status '+reviewStatusClass(item.ai_status||'AI待配置');aiBadge.textContent=['AI通过','AI不通过','AI部分得分'].includes(item.ai_status)&&Number.isFinite(item.ai_score)?'AI评分 '+formatScore(item.ai_score)+' / '+formatScore(item.score):(item.ai_status||'AI待配置');const scoreBadge=document.createElement('span');scoreBadge.className='review-status review-score-badge';function updateTextScoreBadge(){const status=textLocalStatus(item),score=Number(item.score)||0,graded=['自动通过','通过','不通过','部分得分'].includes(status);scoreBadge.className='review-status review-score-badge '+reviewStatusClass(status);scoreBadge.textContent=graded?'得分 '+formatScore(textLocalScore(item))+' / '+formatScore(score):'待定 '+formatScore(score)+'分'}updateTextScoreBadge();header.append(title,badge,aiBadge,scoreBadge);const source=document.createElement('p');source.className='source';source.textContent='试卷内容：'+(item.source_content||'未提取到对应题干');const expected=document.createElement('p');expected.className='subjective-expected';expected.textContent='参考答案：'+(item.expected_answer||'答案文件未提供');const recognized=document.createElement('p');recognized.className='subjective-recognized';recognized.textContent=(item.recognition_source==='ai'?'AI识别（以原图为准）：':'OCR参考（以原图为准）：')+(item.recognized_text||'未识别')+'（置信度 '+Number(item.confidence||0).toFixed(2)+'）';const aiReason=document.createElement('p');aiReason.className='ai-reason';aiReason.textContent='AI图像判断：'+(item.ai_reason||'等待 AI 判断')+(item.ai_visual_text?'；图像识别：'+item.ai_visual_text:'')+(item.ai_corrected_answer?'；规范化答案：'+item.ai_corrected_answer:'');aiReason.hidden=!['AI通过','AI不通过','AI部分得分','AI需复核'].includes(item.ai_status);const handwriting=document.createElement('div');handwriting.className='handwriting-previews';(item.handwriting_urls||[]).forEach(function(url){const image=document.createElement('img');image.src=url;image.loading='lazy';image.alt='第'+item.question+'题手写区域';handwriting.append(image)});const aiActions=document.createElement('div');aiActions.className='review-item-actions';const aiButton=document.createElement('button');aiButton.type='button';aiButton.className='button button-secondary single-ai-button';const aiQuestion=String(item.question||'');const aiBusy=item.ai_status==='AI处理中'||Boolean(reviewState.aiQuestionBusy[aiQuestion]);aiButton.disabled=aiBusy;aiButton.textContent=aiBusy?'正在识别…':'重新 AI 识别';aiButton.setAttribute('aria-label','重新 AI 识别第'+item.question+'题');aiButton.addEventListener('click',function(){requestAiQuestion(item,aiButton)});aiActions.append(aiButton);const controls=document.createElement('div');controls.className='review-controls';const select=document.createElement('select');['待复核','通过','不通过'].forEach(function(status){const option=document.createElement('option');option.value=status;option.textContent=status;select.append(option)});select.setAttribute('aria-label','第'+item.question+'题复核状态');select.value=item.manual_status||'待复核';select.addEventListener('change',function(){item.manual_status=select.value;updateTextScoreBadge();renderScoreBoard()});const input=document.createElement('input');input.type='text';input.setAttribute('aria-label','第'+item.question+'题人工修正答案');input.placeholder='人工修正后的答案';input.value=item.manual_text||'';input.addEventListener('input',function(){item.manual_text=input.value});controls.append(select,input);card.append(header,source,expected,recognized,handwriting,aiReason,aiActions,controls);reviewEl.items.append(card)});if(window.subjectiveView)window.subjectiveView.render(reviewState.items,reviewState.reviewId);reviewEl.report.href=result.report_url||'#';renderWorkspaceStatus();renderScoreBoard();updateAiProgress(ai);window.dispatchEvent(new CustomEvent('platform:review',{detail:{result:result,navigate:scrollToTop}}));if(scrollToTop)reviewEl.results.scrollIntoView({behavior:'smooth',block:'start'})}
+function renderReview(result,scrollToTop=true,submitted){result=workspaceReview.receive(result,reviewState,submitted);if(window.reviewDeletion?.isDeleted(result.review_id))return;document.querySelector('#reviewDeletionStatus').textContent='';if(result.review_id)localStorage.setItem('omrActiveReviewId',result.review_id);reviewEl.results.dataset.recognitionMode=result.recognition_mode||'local_ocr_ai';reviewState.reviewId=result.review_id;reviewState.gradeConfirmed=Boolean(result.grade_confirmed)&&!workspaceReview.hasDraft(result);reviewState.items=result.items||[];reviewState.objective=result.objective||[];applyImportedScores();reviewState.objectiveSummary=result.objective_summary||{};reviewState.scoreSummary=result.score_summary||{};reviewEl.results.classList.remove('hidden');const s=result.review_summary||{};const ai=result.ai_judgment||{};const singleAi=result.ai_question_judgment||{};if(singleAi.status&&singleAi.status!=='处理中'&&singleAi.question)delete reviewState.aiQuestionBusy[String(singleAi.question)];reviewEl.results.setAttribute('aria-label',result.local_ocr_enabled===false?'仅 AI 识别批改结果':'本地 OCR 与 AI 批改结果');reviewEl.paperType.textContent='试卷类型：'+(result.paper_type||'待识别')+(result.paper_type_status?'（'+result.paper_type_status+'）':'')+(result.answer_selection_status?' · '+result.answer_selection_status:'');reviewEl.summary.textContent='姓名 '+(result.student_name||'待识别')+' · 学号 '+(result.student_id||'待识别')+'；填空与材料题 '+(s.total||0)+' 项，规则自动通过 '+(s.auto_pass||0)+' 项，AI通过 '+(s.ai_pass||0)+' 项，AI部分得分 '+(s.ai_partial||0)+' 项，AI复核 '+(s.ai_review||0)+' 项；客观题最终通过 '+(reviewState.objectiveSummary.final_pass||0)+'/'+reviewState.objective.length+'；AI状态：'+(ai.status||'待运行')+(ai.group_count?'；大题分组 '+ai.group_count+' 组':'')+(ai.message?'（'+ai.message+'）':'')+(result.ocr_errors&&result.ocr_errors.length?'；文字识别提示：'+result.ocr_errors.join('；'):'');renderObjective();reviewEl.items.replaceChildren();reviewState.items.forEach(function(item){const card=document.createElement('article');card.className='review-item';const header=document.createElement('header');const title=document.createElement('strong');title.textContent='第'+item.question+'题'+(Number(item.score)>0?' · '+formatScore(item.score)+'分':'');const badge=document.createElement('span');badge.className='review-status '+reviewStatusClass(item.auto_status);badge.textContent=item.auto_status;const aiBadge=document.createElement('span');aiBadge.className='review-status '+reviewStatusClass(item.ai_status||'AI待配置');aiBadge.textContent=['AI通过','AI不通过','AI部分得分'].includes(item.ai_status)&&Number.isFinite(item.ai_score)?'AI评分 '+formatScore(item.ai_score)+' / '+formatScore(item.score):(item.ai_status||'AI待配置');const scoreBadge=document.createElement('span');scoreBadge.className='review-status review-score-badge';function updateTextScoreBadge(){const status=textLocalStatus(item),score=Number(item.score)||0,graded=['自动通过','通过','不通过','部分得分'].includes(status);scoreBadge.className='review-status review-score-badge '+reviewStatusClass(status);scoreBadge.textContent=graded?'得分 '+formatScore(textLocalScore(item))+' / '+formatScore(score):'待定 '+formatScore(score)+'分'}updateTextScoreBadge();header.append(title,badge,aiBadge,scoreBadge);const source=document.createElement('p');source.className='source';source.textContent='试卷内容：'+(item.source_content||'未提取到对应题干');const expected=document.createElement('p');expected.className='subjective-expected';expected.textContent='参考答案：'+(item.expected_answer||'答案文件未提供');const recognized=document.createElement('p');recognized.className='subjective-recognized';recognized.textContent=(item.recognition_source==='ai'?'AI识别（以原图为准）：':'OCR参考（以原图为准）：')+(item.recognized_text||'未识别')+'（置信度 '+Number(item.confidence||0).toFixed(2)+'）';const aiReason=document.createElement('p');aiReason.className='ai-reason';aiReason.textContent='AI图像判断：'+(item.ai_reason||'等待 AI 判断')+(item.ai_visual_text?'；图像识别：'+item.ai_visual_text:'')+(item.ai_corrected_answer?'；规范化答案：'+item.ai_corrected_answer:'');aiReason.hidden=!['AI通过','AI不通过','AI部分得分','AI需复核'].includes(item.ai_status);const handwriting=document.createElement('div');handwriting.className='handwriting-previews';(item.handwriting_display_urls||item.handwriting_urls||[]).forEach(function(url){const image=document.createElement('img');image.src=url;image.loading='lazy';image.alt='第'+item.question+'题手写区域';handwriting.append(image)});const aiActions=document.createElement('div');aiActions.className='review-item-actions';const aiButton=document.createElement('button');aiButton.type='button';aiButton.className='button button-secondary single-ai-button';const aiQuestion=String(item.question||'');const aiBusy=item.ai_status==='AI处理中'||Boolean(reviewState.aiQuestionBusy[aiQuestion]);aiButton.disabled=aiBusy;aiButton.textContent=aiBusy?'正在识别…':'重新 AI 识别';aiButton.setAttribute('aria-label','重新 AI 识别第'+item.question+'题');aiButton.addEventListener('click',function(){requestAiQuestion(item,aiButton)});aiActions.append(aiButton);const controls=createSubjectiveControls(item,function(){updateTextScoreBadge();renderScoreBoard()});card.append(header,source,expected,recognized,handwriting,aiReason,aiActions,controls);reviewEl.items.append(card)});if(window.subjectiveView)window.subjectiveView.render(reviewState.items,reviewState.reviewId);reviewEl.report.href=result.report_url||'#';renderWorkspaceStatus();renderScoreBoard();updateAiProgress(ai);window.dispatchEvent(new CustomEvent('platform:review',{detail:{result:result,navigate:scrollToTop}}));if(scrollToTop)reviewEl.results.scrollIntoView({behavior:'smooth',block:'start'})}
 function stopReviewPolling(){if(reviewState.pollTimer){clearInterval(reviewState.pollTimer);reviewState.pollTimer=null}}
 async function pollReviewStatus(){if(!reviewState.reviewId||reviewState.pollBusy)return;reviewState.pollBusy=true;const polledId=reviewState.reviewId;try{const response=await fetch('/api/review/status?review_id='+encodeURIComponent(polledId));const result=await response.json();if(polledId!==reviewState.reviewId||window.reviewDeletion?.isDeleted(polledId))return;if(!response.ok||!result.ok)throw new Error(result.error||'获取AI状态失败');reviewState.pollErrors=0;const ai=result.ai_judgment||{};const single=result.ai_question_judgment||{};updateAiProgress(ai);if(ai.status==='处理中'||single.status==='处理中'){reviewEl.status.textContent=single.status==='处理中'?(single.message||('正在重新识别第'+single.question+'题…')):(ai.message||'AI正在审核手写内容');return}stopReviewPolling();renderReview(result,false);if(single.status&&single.status!=='处理中'){reviewEl.status.textContent=single.status==='已完成'?('第'+single.question+'题 AI 识别完成，请核对结果。'):(single.message||'单题 AI 识别已结束')}else{reviewEl.status.textContent=ai.status==='已完成'?'AI判断完成，请逐题确认结果。':ai.status==='部分完成'?'AI部分完成：'+(ai.message||'请复核剩余题目'):ai.status==='异常'?'AI处理提示：'+(ai.message||'请稍后重试'):ai.status==='未配置'?'AI接口等待配置。':'文字识别与规则初判完成。'}}catch(error){reviewState.pollErrors+=1;reviewEl.status.textContent='正在重试获取AI进度：'+error.message;if(reviewState.pollErrors===1)showError(error.message)}finally{reviewState.pollBusy=false}}
 function startReviewPolling(){stopReviewPolling();reviewState.pollTimer=setInterval(pollReviewStatus,2000);pollReviewStatus()}

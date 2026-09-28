@@ -905,6 +905,73 @@ def _save_objective_crops(image, destination, region_images=None):
     return paths
 
 
+def _subjective_crop_regions(material_mode="grouped_61_63", program_adjust=0.0):
+    """Share answer-box geometry between recognition and historical scan display."""
+    for idx, number in enumerate(range(31, 46)):
+        col, row = divmod(idx, 5)
+        x, base_y = 62 + col * 174, 184 - row * 29
+        y = base_y + program_adjust
+        options = {"reference_rect": (x, base_y - 4, 153, 22), "region": "program"}
+        if number == 39:
+            options["display_rect"] = (x - 3, y - 6, 156, 26)
+        yield 0, (x, y - 4, 153, 22), str(number), options
+    for idx, number in enumerate(range(46, 61)):
+        y = PAGE_H - 205 - idx * 23.5
+        yield 1, (63, y - 5, 224, 19), str(number), {"region": "correction"}
+    if material_mode == "legacy_subfields":
+        for idx, label in enumerate(("61(1)", "61(2)", "62(1)", "62(2)", "63(1)", "63(2)", "63(3)")):
+            yield 1, (85, 248 - idx * 26, 202, 20), label, {"region": "material"}
+        yield 1, (315, PAGE_H - 338, PAGE_W - 355, 101), "64思路", {}
+        yield 1, (315, 57, PAGE_W - 355, PAGE_H - 373 - 57), "64代码", {}
+    else:
+        for idx, number in enumerate(range(61, 64)):
+            yield 1, (63, PAGE_H - 574 - idx * 21.5 - 17.5, 224, 17.5), str(number), {"region": "material"}
+        yield 1, (326, PAGE_H - 484, 216, 260), "64思路", {}
+        yield 1, (326, PAGE_H - 770, 216, 276), "64代码", {}
+
+
+def _save_display_crops(display_crops, labels, image_dir):
+    paths = {}
+    if image_dir is None:
+        return paths
+    destination = Path(image_dir)
+    destination.mkdir(parents=True, exist_ok=True)
+    for crop, label in zip(display_crops, labels):
+        filename = {"64思路": "64_thought", "64代码": "64_code"}.get(
+            label, re.sub(r"[^0-9A-Za-z_-]", "_", label))
+        path = destination / (filename + ".png")
+        enlarged = cv2.resize(crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+        encoded, buffer = cv2.imencode(".png", enlarged)
+        if encoded:
+            path.write_bytes(buffer.tobytes())
+            paths[label] = str(path)
+    return paths
+
+
+def regenerate_display_crops(card_paths, image_dir, crop_adjustments):
+    """Refresh visual context from original scans using the saved crop alignment."""
+    pages = [image for path in card_paths for _name, image in _load_page(Path(path))]
+    if not pages:
+        raise ValueError("答题卡原始图像缺失")
+    normalized, _scores = _align_and_order_pages(pages)
+    adjustments = crop_adjustments or {}
+    regions = adjustments.get("regions") or {}
+    mode = adjustments.get("material_mode") or "grouped_61_63"
+    shift = float(adjustments.get("page1_program_y_pt") or 0.0)
+    images, labels = [], []
+    for page, rect, label, options in _subjective_crop_regions(mode, shift):
+        if page >= len(normalized):
+            continue
+        matrix = regions.get(options.get("region"), {}).get("matrix")
+        expanded = _expand_crop_rect(options.get("display_rect", rect))
+        crop = _crop_aligned_rect(normalized[page], expanded, matrix)
+        if crop.size == 0:
+            raise ValueError("作答扫描区域为空：" + label)
+        images.append(crop)
+        labels.append(label)
+    return _save_display_crops(images, labels, image_dir)
+
+
 def extract_answer_card(card_paths, image_dir=None, template_config=None):
     template_config = dict(template_config or {})
     settings = recognition_settings(template_config.get("local_ocr_enabled"))
@@ -1005,55 +1072,14 @@ def extract_answer_card(card_paths, image_dir=None, template_config=None):
             "{}={}/{}点".format(name, item["status"], item["inliers"])
             for name, item in region_alignment.items()), flush=True)
 
-    if len(normalized) >= 1:
-        for idx, number in enumerate(range(31, 46)):
-            col, row = divmod(idx, 5)
-            x, base_y = 51 + col * 174 + 11, 184 - row * 29
-            y = base_y + program_adjust
-            label = str(number)
-            reference_rect = (x, base_y - 4, 153, 22)
-            if label == "39":
-                # 39 的笔迹包含覆盖改写，扩大显示区域；OCR仍使用原答题框，避免引入相邻题号。
-                append_crop(0, x, y - 4, 153, 22, label,
-                            display_rect=(x - 3, y - 6, 156, 26), reference_rect=reference_rect, region="program")
-            else:
-                append_crop(0, x, y - 4, 153, 22, label, reference_rect=reference_rect, region="program")
-    if len(normalized) >= 2:
-        for idx, number in enumerate(range(46, 61)):
-            y = PAGE_H - 205 - idx * 23.5
-            append_crop(1, 63, y - 5, 224, 19, str(number), region="correction")
-        if material_mode == "legacy_subfields":
-            for idx, label in enumerate(("61(1)", "61(2)", "62(1)", "62(2)", "63(1)", "63(2)", "63(3)")):
-                y = 253 - idx * 26
-                append_crop(1, 85, y - 5, 202, 20, label, region="material")
-            append_crop(1, 315, PAGE_H - 338, PAGE_W - 355, 101, "64思路")
-            append_crop(1, 315, 57, PAGE_W - 355, PAGE_H - 373 - 57, "64代码")
-        else:
-            # 第十六届第六部分：61—63各一个填空框，64为整栏算法题。
-            for idx, number in enumerate(range(61, 64)):
-                top = 574 + idx * 21.5
-                y = PAGE_H - top - 17.5
-                append_crop(1, 63, y, 224, 17.5, str(number), region="material")
-            append_crop(1, 326, PAGE_H - 484, 216, 260, "64思路")
-            append_crop(1, 326, PAGE_H - 770, 216, 276, "64代码")
+    for page, rect, label, options in _subjective_crop_regions(material_mode, program_adjust):
+        if page < len(normalized):
+            append_crop(page, *rect, label, **options)
     objective_images = _save_objective_crops(normalized[0], image_dir, region_images) if image_dir is not None and normalized else {}
     if image_dir is not None and normalized:
         from objective_view import build_objective_view
         build_objective_view(normalized[0], Path(image_dir) / "objective_view", region_alignment, PAGE_W, PAGE_H)
-    crop_paths = {}
-    if image_dir is not None:
-        destination = Path(image_dir)
-        destination.mkdir(parents=True, exist_ok=True)
-        for display_crop, label in zip(display_crops, labels):
-            filename = {"64思路": "64_thought", "64代码": "64_code"}.get(
-                label, re.sub(r"[^0-9A-Za-z_-]", "_", label))
-            path = destination / (filename + ".png")
-            # 把细小的手写笔画放大后提交视觉模型。
-            enlarged = cv2.resize(display_crop, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
-            encoded, buffer = cv2.imencode(".png", enlarged)
-            if encoded:
-                path.write_bytes(buffer.tobytes())
-                crop_paths[label] = str(path)
+    crop_paths = _save_display_crops(display_crops, labels, image_dir)
     name_crop, name_ratio = prepare_name_crop(normalized[0], image_dir)
     has_name_ink = name_ratio >= 0.006
     if image_dir is not None and has_name_ink:
@@ -1258,6 +1284,11 @@ def attach_structured_scores(review, exam):
 
 
 def _text_final_status(item):
+    if str(item.get("question")) == "64" and item.get("manual_score") is not None:
+        points = _validated_score(item["manual_score"], item.get("score"))
+        if points is None:
+            return "待复核"
+        return "通过" if points == float(item["score"]) else "不通过" if points == 0 else "部分得分"
     manual = item.get("manual_status")
     if manual in {"通过", "不通过"}:
         return manual
@@ -1295,11 +1326,15 @@ def _score_summary(review):
         score = float(item.get("score", 0) or 0)
         status = _text_final_status(item)
         awarded = score if status in pass_statuses else 0.0
-        if item.get("manual_status") not in {"通过", "不通过"} and item.get("ai_status") in {"AI通过", "AI不通过", "AI部分得分"}:
+        has_manual_points = str(item.get("question")) == "64" and item.get("manual_score") is not None
+        if has_manual_points:
+            manual_points = _validated_score(item["manual_score"], score)
+            awarded = manual_points if manual_points is not None else 0.0
+        elif item.get("manual_status") not in {"通过", "不通过"} and item.get("ai_status") in {"AI通过", "AI不通过", "AI部分得分"}:
             ai_score = _validated_score(item.get("ai_score"), score)
             if ai_score is not None:
                 awarded = ai_score
-        if item.get("manual_status") in {"通过", "不通过"}:
+        if has_manual_points or item.get("manual_status") in {"通过", "不通过"}:
             score_basis = "人工复核"
         elif item.get("ai_status") in {"AI通过", "AI不通过", "AI部分得分", "AI需复核"}:
             score_basis = "AI审核"
@@ -1720,11 +1755,30 @@ def build_review_from_structured(exam_text, answer_text, card_paths, image_dir=N
 
 def apply_manual_review(review, decisions, objective_decisions=None):
     decision_map = {str(item.get("question")): item for item in decisions or []}
+    manual_scores = {}
+    for item in review.get("items", []):
+        question = str(item["question"])
+        decision = decision_map.get(question)
+        if decision is None:
+            continue
+        points = decision.get("score")
+        if "score" not in decision and decision.get("status") == "部分得分":
+            points = item.get("manual_score")
+        if points is not None or decision.get("status") == "部分得分":
+            if question != "64":
+                raise ValueError("仅第64题支持设置得分")
+            validated = _validated_score(points, item.get("score"))
+            if validated is None:
+                raise ValueError("第64题得分须为0到{}之间的有效数字".format(item.get("score", 0)))
+            manual_scores[question] = validated
     for item in review.get("items", []):
         decision = decision_map.get(item["question"])
         if not decision:
             continue
         manual_status = str(decision.get("status") or "待复核")
+        manual_score = manual_scores.get(str(item["question"]))
+        if manual_score is not None:
+            manual_status = "通过" if manual_score == float(item["score"]) else "不通过" if manual_score == 0 else "部分得分"
         manual_text = str(decision.get("text") or "")
         normalized_expected = _normalize_correction_expected(
             item.get("question"),
@@ -1741,6 +1795,10 @@ def apply_manual_review(review, decisions, objective_decisions=None):
                 raise ValueError("第{}题改错答案未通过格式与内容校验：{}".format(item["question"], strict_reason))
         item["manual_status"] = manual_status
         item["manual_text"] = manual_text
+        if manual_score is not None:
+            item["manual_score"] = _score_number(manual_score)
+        else:
+            item.pop("manual_score", None)
     objective_map = {str(item.get("question")): item for item in objective_decisions or []}
     known = {item["question"] for item in review.get("objective", [])}
     if set(objective_map) - known:
