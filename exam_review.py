@@ -360,7 +360,7 @@ def _load_page(path: Path):
         try:
             for index, page in enumerate(document):
                 pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), colorspace=fitz.csGRAY, alpha=False)
-                image = np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(pixmap.height, pixmap.width).copy()
+                image = np.frombuffer(pixmap.samples_mv, dtype=np.uint8).reshape(pixmap.height, pixmap.width).copy()
                 pages.append((f"{path.stem}_p{index + 1}", image))
         finally:
             document.close()
@@ -560,7 +560,7 @@ def _reference_pages(reference_pdf=None):
             raise ValueError(f"答题卡定位参考 PDF 至少需要两页：{reference_path}")
         for page in document:
             pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), colorspace=fitz.csGRAY, alpha=False)
-            pages.append(np.frombuffer(pixmap.samples, dtype=np.uint8).reshape(pixmap.height, pixmap.width).copy())
+            pages.append(np.frombuffer(pixmap.samples_mv, dtype=np.uint8).reshape(pixmap.height, pixmap.width).copy())
     finally:
         document.close()
     return pages
@@ -591,7 +591,7 @@ def _align_and_order_pages(images, reference_pdf=None):
     if len(references) < 2 or len(rough_pages) < 2:
         return rough_pages, []
     candidates = []
-    for page_index, image in enumerate(rough_pages):
+    for page_index, image in enumerate(rough_pages[:2]):
         row = []
         for reference_index, reference in enumerate(references[:2]):
             aligned, score = _feature_align(image, reference)
@@ -1017,6 +1017,7 @@ def extract_answer_card(card_paths, image_dir=None, template_config=None):
     page_images = [image for _name, image in pages]
     (normalized, alignment_scores, references, region_images, region_alignment,
      program_shift, program_match_score) = prepare_card_alignment(page_images, reference_pdf)
+    del pages, page_images
     objective = {}
     objective_flags = {}
     if normalized:

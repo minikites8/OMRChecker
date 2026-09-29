@@ -7,6 +7,7 @@
 
 """
 import os
+from contextlib import closing
 from copy import deepcopy
 from csv import QUOTE_NONNUMERIC
 from pathlib import Path
@@ -200,37 +201,37 @@ def process_dir(
 
 def show_template_layouts(omr_files, template, tuning_config, outputs_namespace):
     for file_path in omr_files:
-        images = ImageUtils.load_omr_image(file_path, tuning_config)
-        for img_name, in_omr in images:
-            in_omr = template.image_instance_ops.apply_preprocessors(
-                str(file_path), in_omr, template
-            )
-            if in_omr is None:
-                new_file_path = outputs_namespace.paths.errors_dir.joinpath(img_name)
-                outputs_namespace.OUTPUT_SET.append(
-                    [img_name] + outputs_namespace.empty_resp
+        with closing(ImageUtils.iter_omr_images(file_path, tuning_config)) as images:
+            for img_name, in_omr in images:
+                in_omr = template.image_instance_ops.apply_preprocessors(
+                    str(file_path), in_omr, template
                 )
-                if check_and_move(ERROR_CODES.NO_MARKER_ERR, file_path, new_file_path):
-                    err_line = [
-                        img_name,
-                        file_path,
-                        new_file_path,
-                        "NA",
-                    ] + outputs_namespace.empty_resp
-                    pd.DataFrame(err_line, dtype=str).T.to_csv(
-                        outputs_namespace.files_obj["Errors"],
-                        mode="a",
-                        quoting=QUOTE_NONNUMERIC,
-                        header=False,
-                        index=False,
+                if in_omr is None:
+                    new_file_path = outputs_namespace.paths.errors_dir.joinpath(img_name)
+                    outputs_namespace.OUTPUT_SET.append(
+                        [img_name] + outputs_namespace.empty_resp
                     )
-                continue
-            template_layout = template.image_instance_ops.draw_template_layout(
-                in_omr, template, shifted=False, border=2
-            )
-            InteractionUtils.show(
-                f"Template Layout: {img_name}", template_layout, 1, 1, config=tuning_config
-            )
+                    if check_and_move(ERROR_CODES.NO_MARKER_ERR, file_path, new_file_path):
+                        err_line = [
+                            img_name,
+                            file_path,
+                            new_file_path,
+                            "NA",
+                        ] + outputs_namespace.empty_resp
+                        pd.DataFrame(err_line, dtype=str).T.to_csv(
+                            outputs_namespace.files_obj["Errors"],
+                            mode="a",
+                            quoting=QUOTE_NONNUMERIC,
+                            header=False,
+                            index=False,
+                        )
+                    continue
+                template_layout = template.image_instance_ops.draw_template_layout(
+                    in_omr, template, shifted=False, border=2
+                )
+                InteractionUtils.show(
+                    f"Template Layout: {img_name}", template_layout, 1, 1, config=tuning_config
+                )
 
 
 def _process_single_image(
@@ -376,23 +377,27 @@ def process_files(
     image_file_names = {f.name for f in omr_files if f.suffix.lower() != ".pdf"}
 
     for file_path in omr_files:
-        images = ImageUtils.load_omr_image(file_path, tuning_config)
-        for img_name, in_omr in images:
-            if file_path.suffix.lower() == ".pdf" and img_name in image_file_names:
-                logger.warning(
-                    f"PDF page name '{img_name}' collides with an existing image file, output may be overwritten."
-                )
-            files_counter += 1
-            _process_single_image(
-                file_path,
-                img_name,
-                in_omr,
-                template,
-                tuning_config,
-                evaluation_config,
-                outputs_namespace,
-                files_counter,
-            )
+        with closing(ImageUtils.iter_omr_images(file_path, tuning_config)) as images:
+            for img_name, in_omr in images:
+                if file_path.suffix.lower() == ".pdf" and img_name in image_file_names:
+                    logger.warning(
+                        f"PDF page name '{img_name}' collides with an existing image file, output may be overwritten."
+                    )
+                files_counter += 1
+                try:
+                    _process_single_image(
+                        file_path,
+                        img_name,
+                        in_omr,
+                        template,
+                        tuning_config,
+                        evaluation_config,
+                        outputs_namespace,
+                        files_counter,
+                    )
+                finally:
+                    template.image_instance_ops.reset_all_save_img()
+                    del in_omr
 
     print_stats(start_time, files_counter, tuning_config)
 

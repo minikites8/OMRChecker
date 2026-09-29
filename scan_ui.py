@@ -407,6 +407,24 @@ def _recognition_settings(value=None):
     return settings
 
 
+class _StagedReviewFiles(list):
+    """Server-created paths for validated uploads waiting in the review queue."""
+
+
+def _stage_review_groups(groups, staging_root):
+    staged = []
+    try:
+        for index, group in enumerate(groups):
+            destination = staging_root / str(index)
+            destination.mkdir(parents=True, exist_ok=False)
+            paths = _StagedReviewFiles(save_uploads(group["files"], destination))
+            staged.append({"label": group["label"], "files": paths})
+    except Exception:
+        shutil.rmtree(staging_root, ignore_errors=True)
+        raise
+    return staged
+
+
 def _create_review_report(import_id, normalized_path, imported, card_files,
                           batch_id="", batch_index=0, label="", update_latest=True,
                           template_id=None, owner_user_id="", local_ocr_enabled=None):
@@ -418,7 +436,14 @@ def _create_review_report(import_id, normalized_path, imported, card_files,
     output_dir = review_root / "output"
     input_dir.mkdir(parents=True, exist_ok=False)
     output_dir.mkdir(parents=True, exist_ok=True)
-    card_paths = save_uploads(card_files, input_dir)
+    if isinstance(card_files, _StagedReviewFiles):
+        card_paths = []
+        for source in card_files:
+            destination = input_dir / source.name
+            shutil.copy2(source, destination)
+            card_paths.append(destination)
+    else:
+        card_paths = save_uploads(card_files, input_dir)
     shutil.copy2(normalized_path, input_dir / "normalized_exam.json")
     selected_template = TEMPLATE_MANAGER.get(template_id)
     review_arguments = {
@@ -649,6 +674,7 @@ def _batch_review_worker(batch_id, import_id, normalized_path, imported, groups,
             except (OSError, ValueError, json.JSONDecodeError):
                 pass
     finally:
+        shutil.rmtree(batch_path.parent / "input", ignore_errors=True)
         with BATCH_REVIEW_LOCK:
             BATCH_REVIEW_WORKERS.pop(batch_id, None)
 
@@ -684,16 +710,23 @@ def start_batch_review(payload):
             for group in groups
         ],
     }
-    with BATCH_REVIEW_LOCK:
-        _write_batch(batch_path, batch)
-        worker = threading.Thread(
-            target=bind_context(_batch_review_worker),
-            args=(batch_id, import_id, normalized_path, imported, groups, concurrency, selected_template["id"], str(payload.get("_actor_user_id") or ""), settings["local_ocr_enabled"]),
-            daemon=True,
-            name="omr-batch-{}".format(batch_id),
-        )
-        BATCH_REVIEW_WORKERS[batch_id] = worker
-        worker.start()
+    groups = _stage_review_groups(groups, batch_path.parent / "input")
+    try:
+        with BATCH_REVIEW_LOCK:
+            _write_batch(batch_path, batch)
+            worker = threading.Thread(
+                target=bind_context(_batch_review_worker),
+                args=(batch_id, import_id, normalized_path, imported, groups, concurrency, selected_template["id"], str(payload.get("_actor_user_id") or ""), settings["local_ocr_enabled"]),
+                daemon=True,
+                name="omr-batch-{}".format(batch_id),
+            )
+            BATCH_REVIEW_WORKERS[batch_id] = worker
+            worker.start()
+    except Exception:
+        with BATCH_REVIEW_LOCK:
+            BATCH_REVIEW_WORKERS.pop(batch_id, None)
+        shutil.rmtree(batch_path.parent / "input", ignore_errors=True)
+        raise
     return batch
 
 
@@ -968,7 +1001,8 @@ def read_batch_queue(limit=40):
     if root.is_dir():
         for path in root.glob("*/batch.json"):
             try:
-                batch = json.loads(path.read_text(encoding="utf-8"))
+                with BATCH_REVIEW_LOCK:
+                    batch = json.loads(path.read_text(encoding="utf-8"))
                 if not isinstance(batch, dict):
                     continue
                 batch_id = str(batch.get("batch_id") or path.parent.name)
@@ -1481,7 +1515,13 @@ class ScanUIHandler(BaseHTTPRequestHandler):
             self.send_json(404, {"ok": False, "error": "文件不存在"})
             return
         content_type = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
-        self.send_bytes(200, path.read_bytes(), content_type)
+        with path.open("rb") as source:
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(os.fstat(source.fileno()).st_size))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            shutil.copyfileobj(source, self.wfile, length=256 * 1024)
 
     def _admin_request(self, method):
         parsed = urlparse(self.path)

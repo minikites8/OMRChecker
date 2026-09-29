@@ -16,11 +16,15 @@ def test_subjective_assets_load_before_the_legacy_review_renderer():
 def test_existing_controls_and_save_payload_are_preserved():
     app=(ROOT/'ui/app.js').read_text(encoding='utf-8')
     assert 'window.subjectiveView.render(reviewState.items,reviewState.reviewId)' in app
-    assert "'题复核状态'" in app and "'题人工修正答案'" in app
+    assert "'题复核结论'" in app and "'题人工修正答案'" in app
     collaboration=(ROOT/'ui/collaboration.js').read_text(encoding='utf-8')
     assert 'status: item.manual_status' in collaboration and 'text: item.manual_text' in collaboration
     assert 'workspaceReview.pending(reviewState, forConfirmation)' in app
-    assert "select.addEventListener('change',function(){item.manual_status=select.value;updateTextScoreBadge();renderScoreBoard()})" in app
+    assert "createSubjectiveControls(item,function(){updateTextScoreBadge();renderScoreBoard()})" in app
+    assert "button.addEventListener('click', function () {" in app
+    assert "item.manual_status = status;" in app
+    assert "group.updateState(); onChange();" in app
+    assert "button.dispatchEvent(new Event('input', {bubbles: true}))" in app
 
 
 def test_subjective_filter_delegation_and_live_scoring_contract():

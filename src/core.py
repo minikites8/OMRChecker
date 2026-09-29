@@ -24,12 +24,11 @@ from src.utils.interaction import InteractionUtils
 class ImageInstanceOps:
     """Class to hold fine-tuned utilities for a group of images. One instance for each processing directory."""
 
-    save_img_list: Any = defaultdict(list)
-
     def __init__(self, tuning_config):
         super().__init__()
         self.tuning_config = tuning_config
         self.save_image_level = tuning_config.outputs.save_image_level
+        self.save_img_list: Any = defaultdict(list)
         self.ocr_recognizer = None
         self.ocr_source_image = None
 
@@ -914,5 +913,4 @@ class ImageInstanceOps:
 
     def reset_all_save_img(self):
         self.ocr_source_image = None
-        for i in range(self.save_image_level):
-            self.save_img_list[i + 1] = []
+        self.save_img_list.clear()

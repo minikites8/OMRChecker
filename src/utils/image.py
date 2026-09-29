@@ -195,7 +195,12 @@ class ImageUtils:
 
     @staticmethod
     def load_omr_image(file_path, tuning_config):
-        """Load OMR image from file. Returns list of (display_name, image_array) tuples."""
+        """Compatibility API returning all requested pages as a list."""
+        return list(ImageUtils.iter_omr_images(file_path, tuning_config))
+
+    @staticmethod
+    def iter_omr_images(file_path, tuning_config):
+        """Yield one grayscale page at a time; close the PDF when exhausted/closed."""
         suffix = file_path.suffix.lower()
         if suffix == ".pdf":
             import fitz
@@ -204,7 +209,7 @@ class ImageUtils:
                 doc = fitz.open(str(file_path))
             except Exception as e:
                 logger.error(f"Failed to open PDF: '{file_path}' - {e}")
-                return []
+                return
 
             try:
                 pdf_params = tuning_config.pdf_params
@@ -234,7 +239,6 @@ class ImageUtils:
                     dpi = ImageUtils._detect_pdf_native_dpi(doc, pages)
                     logger.info(f"Auto-detected PDF native DPI: {dpi}")
 
-                images = []
                 for p in pages:
                     page = doc[p]
                     mat = fitz.Matrix(dpi / 72, dpi / 72)
@@ -247,16 +251,18 @@ class ImageUtils:
                         if len(doc) > 1
                         else f"{file_path.stem}.png"
                     )
-                    images.append((name, img))
+                    del pix, page
+                    yield name, img
+                    del img
             except Exception as e:
                 logger.error(f"Failed to render PDF: '{file_path}' - {e}")
-                return []
+                return
             finally:
                 doc.close()
-            return images
+            return
         else:
             img = cv2.imread(str(file_path), cv2.IMREAD_GRAYSCALE)
-            return [(file_path.name, img)]
+            yield file_path.name, img
 
     @staticmethod
     def order_points(pts):

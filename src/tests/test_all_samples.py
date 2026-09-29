@@ -1,13 +1,31 @@
+import csv
+import io
 import os
+import re
 import shutil
 from glob import glob
+from pathlib import Path
 
 from src.tests.utils import run_entry_point, setup_mocker_patches
 
 
 def read_file(path):
-    with open(path) as file:
-        return file.read()
+    """Canonicalize CSV path columns for the shared cross-platform snapshots."""
+    with open(path, encoding="utf-8", newline="") as file:
+        rows = list(csv.reader(file))
+    if not rows:
+        return ""
+    path_columns = [
+        index for index, name in enumerate(rows[0])
+        if name in {"input_path", "output_path"}
+    ]
+    for row in rows[1:]:
+        for index in path_columns:
+            if index < len(row):
+                row[index] = row[index].replace("\\", "/")
+    output = io.StringIO()
+    csv.writer(output, quoting=csv.QUOTE_NONNUMERIC, lineterminator="\n").writerows(rows)
+    return output.getvalue()
 
 
 def run_sample(mocker, sample_path):
@@ -37,8 +55,13 @@ def extract_sample_outputs(output_dir):
     sample_outputs = {}
     for _dir, _subdir, _files in os.walk(output_dir):
         for file in glob(os.path.join(_dir, EXT)):
-            relative_path = os.path.relpath(file, output_dir)
-            sample_outputs[relative_path] = read_file(file)
+            relative_path = Path(os.path.relpath(file, output_dir))
+            # Snapshot data is independent of the local hour in the output filename.
+            if relative_path.parent.name == "Results" and re.fullmatch(
+                r"Results_(?:0[1-9]|1[0-2])(?:AM|PM)\.csv", relative_path.name
+            ):
+                relative_path = relative_path.with_name("Results_05AM.csv")
+            sample_outputs[relative_path.as_posix()] = read_file(file)
     return sample_outputs
 
 
