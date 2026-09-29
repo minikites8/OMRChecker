@@ -1,5 +1,6 @@
 """HTTP workspace boundary shared by the local server and FastAPI."""
 import json
+import re
 from functools import wraps
 from urllib.parse import quote, urlsplit
 
@@ -9,6 +10,13 @@ from workspace_context import split_workspace_path, tenant_route, workspace_scop
 
 def is_admin_api(path):
     return path == "/api/admin" or path.startswith("/api/admin/")
+
+
+def is_legacy_objective_asset(method, path):
+    """Pre-workspace objective scan links belong to the migrated shared workspace."""
+    return method in {'GET', 'HEAD'} and bool(re.fullmatch(
+        r'/reviews/[A-Za-z0-9_-]+/output/handwriting/objective_view/'
+        r'(?:objective\.png|page\.png|manifest\.json)', path))
 
 
 def workspace_request(method):
@@ -48,6 +56,10 @@ def workspace_request(method):
                     handler.send_json(200, result)
                     return
                 if not wid:
+                    if is_legacy_objective_asset(handler.command, route):
+                        server.WORKSPACES.require_member('shared', user)
+                        handler.send_redirect('/api/w/shared' + original)
+                        return
                     raise WorkspaceError(409, '请先选择阅卷工作区')
                 if is_admin_api(route):
                     handler.path = route + ('?' + parsed.query if parsed.query else '')
@@ -122,7 +134,11 @@ def install_fastapi_workspaces(app, server, get_user, get_store, auth_enabled=No
                         return JSONResponse(result, status_code=response.status_code, headers=headers)
                     return response
             if tenant_route(route) and (auth_enabled() if auth_enabled else server.AUTH_SERVICE.enabled):
-                await run_in_threadpool(get_user, request)
+                user = await run_in_threadpool(get_user, request)
+                if is_legacy_objective_asset(request.method, route):
+                    await run_in_threadpool(get_store().require_member, 'shared', user)
+                    target = '/api/w/shared' + path + ('?' + request.url.query if request.url.query else '')
+                    return RedirectResponse(target, status_code=302, headers={'Cache-Control': 'no-store'})
                 raise WorkspaceError(409, '请先选择阅卷工作区')
             return await call_next(request)
         except WorkspaceError as error:

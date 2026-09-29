@@ -100,10 +100,11 @@
     });
     $('objectiveQuestionCount').textContent = state.items.length + ' 题';
   }
+  function assetUrl(path) { return window.omrApiUrl ? window.omrApiUrl(path) : path; }
   function drawImage() {
     if (!state.manifest) return;
     const view = state.manifest[state.mode], image = $('objectivePageImage'), canvas = $('objectiveSvg');
-    image.src = state.manifest.asset_base + view.image; image.width = view.width; image.height = view.height;
+    image.src = assetUrl(state.manifest.asset_base + view.image); image.width = view.width; image.height = view.height;
     canvas.setAttribute('viewBox', '0 0 ' + view.width + ' ' + view.height); canvas.replaceChildren();
     const itemMap = new Map(state.items.map(item => [String(item.question), item]));
     state.manifest.questions.forEach(region => {
@@ -146,7 +147,7 @@
     try {
       let manifest = retry ? null : state.cache.get(id);
       if (!manifest) {
-        const base = '/reviews/' + encodeURIComponent(id) + '/output/handwriting/objective_view/';
+        const base = assetUrl('/reviews/' + encodeURIComponent(id) + '/output/handwriting/objective_view/');
         let response = await fetch(base + 'manifest.json', { signal: state.controller.signal });
         if (response.ok) { manifest = { ...await response.json(), ok: true, asset_base: base }; }
         else { response = await fetch('/api/review/objective-view?review_id=' + encodeURIComponent(id), { signal: state.controller.signal }); manifest = await response.json(); }
