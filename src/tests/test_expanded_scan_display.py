@@ -65,8 +65,8 @@ def test_old_review_gets_expanded_display_urls_and_keeps_grades(legacy_review, m
     item=result['items'][0]
     assert len(calls)==1
     assert item['handwriting_display_urls']==[
-        '/reviews/history-scan/output/handwriting/display_v1/64_thought.png',
-        '/reviews/history-scan/output/handwriting/display_v1/64_code.png']
+        '/reviews/history-scan/output/handwriting/display_v2/64_thought.png',
+        '/reviews/history-scan/output/handwriting/display_v2/64_code.png']
     for key,value in original['items'][0].items(): assert item[key]==value
     assert result['score_summary']==original['score_summary']
     saved=json.loads(path.read_text(encoding='utf-8'))
@@ -78,7 +78,7 @@ def test_old_review_gets_expanded_display_urls_and_keeps_grades(legacy_review, m
 def test_refresh_rebuilds_a_missing_cached_image(legacy_review, monkeypatch):
     path,original=legacy_review; calls=install_fake_crops(monkeypatch)
     scan_ui.read_review_status(original['review_id'])
-    (path.parent/'handwriting'/'display_v1'/'64_code.png').unlink()
+    (path.parent/'handwriting'/'display_v2'/'64_code.png').unlink()
     scan_ui.read_review_status(original['review_id'])
     assert len(calls)==2
 
@@ -93,7 +93,7 @@ def test_missing_original_scan_preserves_existing_review(legacy_review, monkeypa
 
 def test_current_expanded_crops_keep_existing_urls(legacy_review, monkeypatch):
     path,original=legacy_review; calls=install_fake_crops(monkeypatch)
-    original['crop_adjustments'].update(version=5,display_padding_pt={'x':4.0,'y':2.0})
+    original['crop_adjustments'].update(version=5,display_padding_pt={'x':4.0,'y':2.0},algorithm_padding_pt={'x':12.0,'y':12.0})
     path.write_text(json.dumps(original),encoding='utf-8')
     result=scan_ui.read_review_status(original['review_id'])
     assert calls==[] and result['items']==original['items']
@@ -147,3 +147,19 @@ def test_legacy_record_resolves_id_from_its_directory(legacy_review, monkeypatch
     path.write_text(json.dumps(original),encoding='utf-8')
     result=scan_ui.read_review_status(identifier)
     assert result['items'][0]['handwriting_display_urls'][0].startswith('/reviews/history-scan/')
+
+
+def test_pre_expansion_q64_crops_refresh_once_without_regrading(legacy_review, monkeypatch):
+    path, original = legacy_review
+    calls = install_fake_crops(monkeypatch)
+    original['crop_adjustments'].update(version=5, display_padding_pt={'x':4.0,'y':2.0})
+    path.write_text(json.dumps(original), encoding='utf-8')
+    result = scan_ui.read_review_status(original['review_id'])
+    assert len(calls) == 1
+    assert result['subjective_display'] == {'version':2, 'padding_pt':{'x':4.0,'y':2.0},
+                                           'algorithm_padding_pt':{'x':12.0,'y':12.0}}
+    for key, value in original['items'][0].items():
+        assert result['items'][0][key] == value
+    assert result['score_summary'] == original['score_summary']
+    scan_ui.read_review_status(original['review_id'])
+    assert len(calls) == 1

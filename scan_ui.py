@@ -781,17 +781,21 @@ def _ensure_review_scores(review):
 
 def _ensure_review_display_crops(review, review_path):
     """Backfill expanded scan previews while retaining recognition and grading data."""
-    from exam_review import DISPLAY_CROP_PADDING_PT, regenerate_display_crops
+    from exam_review import DISPLAY_CROP_PADDING_PT, ALGORITHM_CROP_PADDING_PT, regenerate_display_crops
     padding = {"x": DISPLAY_CROP_PADDING_PT[0], "y": DISPLAY_CROP_PADDING_PT[1]}
+    algorithm_padding = {"x": ALGORITHM_CROP_PADDING_PT[0], "y": ALGORITHM_CROP_PADDING_PT[1]}
     adjustments = review.get("crop_adjustments") or {}
-    if adjustments.get("display_padding_pt") == padding:
-        return False
     items = review.get("items") or []
+    algorithm_current = (not any(str(item.get("question")) == "64" for item in items)
+                         or adjustments.get("algorithm_padding_pt") == algorithm_padding)
+    if adjustments.get("display_padding_pt") == padding and algorithm_current:
+        return False
     if not any(item.get("handwriting_urls") for item in items):
         return False
     cache = review.get("subjective_display") or {}
     cached_urls = [url for item in items for url in item.get("handwriting_display_urls", [])]
-    if cache.get("version") == 1 and cache.get("padding_pt") == padding and cached_urls:
+    if (cache.get("version") == 2 and cache.get("padding_pt") == padding
+            and cache.get("algorithm_padding_pt") == algorithm_padding and cached_urls):
         if all(url.startswith("/reviews/") and
                resolve_under(REVIEW_ROOT, unquote(url[9:])).is_file() for url in cached_urls):
             return False
@@ -803,7 +807,7 @@ def _ensure_review_display_crops(review, review_path):
         path for path in input_dir.iterdir() if path.suffix.lower() in ALLOWED_EXTENSIONS)
     if not files or any(not path.is_file() for path in files):
         return False
-    destination = review_path.parent / "handwriting" / "display_v1"
+    destination = review_path.parent / "handwriting" / "display_v2"
     try:
         paths = regenerate_display_crops(files, destination, adjustments)
         PLATFORM_PERSISTENCE.sync_tree(
@@ -817,13 +821,13 @@ def _ensure_review_display_crops(review, review_path):
     for item in items:
         question = str(item.get("question", ""))
         labels = ["64思路", "64代码"] if question == "64" else [question]
-        urls = ["/reviews/{}/output/handwriting/display_v1/{}".format(
+        urls = ["/reviews/{}/output/handwriting/display_v2/{}".format(
             review_id, Path(paths[label]).name) for label in labels if label in paths]
         if urls:
             item["handwriting_display_urls"] = urls
             updated = True
     if updated:
-        review["subjective_display"] = {"version": 1, "padding_pt": padding}
+        review["subjective_display"] = {"version": 2, "padding_pt": padding, "algorithm_padding_pt": algorithm_padding}
     return updated
 
 

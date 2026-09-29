@@ -10,7 +10,7 @@ import numpy as np
 from exam_review import PAGE_W, PAGE_H, _expand_crop_rect, _subjective_crop_regions
 from objective_view import objective_layout
 
-OVERLAY_VERSION = 2
+OVERLAY_VERSION = 3
 OBJECTIVE_COLOR = (0.05, 0.48, 0.29)
 FILL_COLOR = (0.12, 0.36, 0.85)
 

@@ -29,7 +29,7 @@ def crops(monkeypatch, tmp_path):
 @pytest.mark.parametrize('label,rect', [
     ('31',(62,180,153,22)), ('46',(63,exam_review.PAGE_H-210,224,19)),
     ('61',(63,exam_review.PAGE_H-591.5,224,17.5)),
-    ('64思路',(326,exam_review.PAGE_H-484,216,260)), ('64代码',(326,exam_review.PAGE_H-770,216,276)),
+    ('64思路',(314,exam_review.PAGE_H-496,240,284)), ('64代码',(314,exam_review.PAGE_H-782,240,300)),
 ])
 def test_saved_visual_crops_include_more_context(crops,label,rect):
     report, observed, page = crops()

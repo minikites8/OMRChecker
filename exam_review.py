@@ -30,6 +30,8 @@ PAGE_W = 595.2756
 PAGE_H = 841.8898
 MARKER_INSET_PT = 26.0
 DISPLAY_CROP_PADDING_PT = (4.0, 2.0)
+# Q64 handwriting often reaches the answer-box border and crosses the split.
+ALGORITHM_CROP_PADDING_PT = (12.0, 12.0)
 PAPER_TYPE_OPTIONS = "ABC"
 PAPER_TYPE_BUBBLE_X = 458.0
 PAPER_TYPE_BUBBLE_Y = 259.0
@@ -611,10 +613,10 @@ def _crop_pdf_rect(image, x, y, width, height):
     return image[top:bottom, left:right].copy()
 
 
-def _expand_crop_rect(rect):
+def _expand_crop_rect(rect, padding=None):
     """Expand visual/AI context in PDF points, clamped to the reference page."""
     x, y, width, height = rect
-    horizontal, vertical = DISPLAY_CROP_PADDING_PT
+    horizontal, vertical = DISPLAY_CROP_PADDING_PT if padding is None else padding
     left, bottom = max(0.0, x - horizontal), max(0.0, y - vertical)
     right = min(PAGE_W, x + width + horizontal)
     top = min(PAGE_H, y + height + vertical)
@@ -924,13 +926,13 @@ def _subjective_crop_regions(material_mode="grouped_61_63", program_adjust=0.0):
     if material_mode == "legacy_subfields":
         for idx, label in enumerate(("61(1)", "61(2)", "62(1)", "62(2)", "63(1)", "63(2)", "63(3)")):
             yield 1, (85, 248 - idx * 26, 202, 20), label, {"region": "material"}
-        yield 1, (315, PAGE_H - 338, PAGE_W - 355, 101), "64思路", {}
-        yield 1, (315, 57, PAGE_W - 355, PAGE_H - 373 - 57), "64代码", {}
+        yield 1, _expand_crop_rect((315, PAGE_H - 338, PAGE_W - 355, 101), ALGORITHM_CROP_PADDING_PT), "64思路", {}
+        yield 1, _expand_crop_rect((315, 57, PAGE_W - 355, PAGE_H - 373 - 57), ALGORITHM_CROP_PADDING_PT), "64代码", {}
     else:
         for idx, number in enumerate(range(61, 64)):
             yield 1, (63, PAGE_H - 574 - idx * 21.5 - 17.5, 224, 17.5), str(number), {"region": "material"}
-        yield 1, (326, PAGE_H - 484, 216, 260), "64思路", {}
-        yield 1, (326, PAGE_H - 770, 216, 276), "64代码", {}
+        yield 1, _expand_crop_rect((326, PAGE_H - 484, 216, 260), ALGORITHM_CROP_PADDING_PT), "64思路", {}
+        yield 1, _expand_crop_rect((326, PAGE_H - 770, 216, 276), ALGORITHM_CROP_PADDING_PT), "64代码", {}
 
 
 def _save_display_crops(display_crops, labels, image_dir):
@@ -1138,6 +1140,7 @@ def extract_answer_card(card_paths, image_dir=None, template_config=None):
             "regions": region_alignment,
             "version": 5,
             "display_padding_pt": {"x": DISPLAY_CROP_PADDING_PT[0], "y": DISPLAY_CROP_PADDING_PT[1]},
+            "algorithm_padding_pt": {"x": ALGORITHM_CROP_PADDING_PT[0], "y": ALGORITHM_CROP_PADDING_PT[1]},
             "answer_card_layout": answer_card_layout,
             "material_mode": material_mode,
         },
