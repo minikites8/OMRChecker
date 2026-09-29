@@ -134,8 +134,9 @@
     }
     settingsSummary();
   });
+  window.addEventListener('review:files-submitted', () => { commitFiles([], '任务已入队，可选择下一批答卷继续提交。'); });
   window.addEventListener('platform:busy', event => {
-    const changed = busy !== Boolean(event.detail.running); busy = Boolean(event.detail.running);
+    const nextBusy = Boolean(event.detail.submitting ?? event.detail.running); const changed = busy !== nextBusy; busy = nextBusy;
     zone.classList.toggle('is-busy', busy); zone.setAttribute('aria-disabled', String(busy));
     ['reviewTemplateSelect','reviewRecognitionMode','workflowImportPaper'].forEach(id => { $(id).disabled = busy; });
     if (changed) renderQueue();

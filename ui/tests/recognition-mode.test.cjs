@@ -35,7 +35,8 @@ test('server default initializes fresh browsers and preserves an explicit select
   assert.equal(saved.context.localOcrEnabledForTask(), true);
 });
 test('single, batch, and scanner payloads carry the actual mode', () => {
-  assert.equal((app.match(/local_ocr_enabled:localOcrEnabledForTask\(\)/g) || []).length, 2);
+  assert.ok(app.includes('local_ocr_enabled:localOcrEnabledForTask()'));
+  assert.ok(app.includes('const payload=multiple?{...snapshot,card_groups:prepared}:{...snapshot,card_files:prepared[0].files}'));
   assert.ok(app.includes('payload.local_ocr_enabled=localOcrEnabledForTask()'));
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   assert.ok(html.includes('id="reviewRecognitionMode"'));

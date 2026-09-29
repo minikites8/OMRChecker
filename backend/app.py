@@ -334,6 +334,12 @@ def review_status(request: Request, review_id: str = "") -> JSONResponse:
     return _review_response(request, lambda: legacy.read_review_status(review_id))
 
 
+@app.get("/api/review/batch/queue")
+def review_batch_queue(request: Request) -> JSONResponse:
+    current_user(request)
+    return _review_response(request, legacy.read_batch_queue)
+
+
 @app.get("/api/review/batch/status")
 def batch_status(request: Request, batch_id: str = "") -> JSONResponse:
     current_user(request)

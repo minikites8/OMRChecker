@@ -18,7 +18,7 @@ import threading
 import time
 import uuid
 import webbrowser
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -578,62 +578,50 @@ def _batch_review_worker(batch_id, import_id, normalized_path, imported, groups,
     _clean_id, batch_path = _batch_path(batch_id)
     started = time.perf_counter()
     try:
-        with BATCH_REVIEW_LOCK:
-            batch = json.loads(batch_path.read_text(encoding="utf-8"))
-            batch["status"] = "处理中"
-            for entry in batch["reviews"]:
-                entry["status"] = "处理中"
-            _write_batch(batch_path, batch)
         results = [None] * len(groups)
-        batch_slots = threading.Semaphore(concurrency)
 
         def run_group(index, group):
-            with batch_slots:
-                return _create_review_report(
-                    import_id,
-                    normalized_path,
-                    imported,
-                    group["files"],
-                    batch_id,
-                    index,
-                    group["label"],
-                    False,
-                    template_id,
-                    owner_user_id,
-                    local_ocr_enabled,
-                )
-
-        futures = {
-            REVIEW_EXECUTOR.submit(bind_context(run_group), index, group): index
-            for index, group in enumerate(groups)
-        }
-        for future in as_completed(futures):
-            index = futures[future]
-            try:
-                report = future.result()
-                entry = _compact_review(report, groups[index]["label"])
-                results[index] = entry
-            except Exception as error:
-                logging.getLogger("omrchecker.review").exception(
-                    "后台批改失败 batch_id=%s index=%s", batch_id, index
-                )
-                message = str(error) if isinstance(error, (ValueError, FileNotFoundError, ScanFailure)) else "批改服务暂时失败，请查看服务日志"
-                entry = {
-                    "status": "失败",
-                    "label": groups[index]["label"],
-                    "review_id": "",
-                    "error": message,
-                }
-                results[index] = entry
+            # Mark only a group that has acquired an executor slot as running.
             with BATCH_REVIEW_LOCK:
-                latest = json.loads(batch_path.read_text(encoding="utf-8"))
-                latest["reviews"][index] = entry
-                latest["completed"] = sum(item.get("status") == "已完成" for item in latest["reviews"])
-                latest["failed"] = sum(item.get("status") == "失败" for item in latest["reviews"])
-                latest["message"] = "已完成 {}/{} 份".format(
-                    latest["completed"] + latest["failed"], latest["total"]
-                )
-                _write_batch(batch_path, latest)
+                batch = json.loads(batch_path.read_text(encoding="utf-8"))
+                batch["status"] = "处理中"
+                batch["reviews"][index]["status"] = "处理中"
+                _write_batch(batch_path, batch)
+            return _create_review_report(
+                import_id, normalized_path, imported, group["files"],
+                batch_id, index, group["label"], False, template_id,
+                owner_user_id, local_ocr_enabled,
+            )
+
+        # Bound each batch's outstanding work; waiting for its next slot uses
+        # the scheduler thread, keeping the shared executor free for other batches.
+        futures = {}
+        next_index = 0
+        while next_index < len(groups) or futures:
+            while next_index < len(groups) and len(futures) < concurrency:
+                index = next_index
+                futures[REVIEW_EXECUTOR.submit(bind_context(run_group), index, groups[index])] = index
+                next_index += 1
+            completed, _pending = wait(futures, return_when=FIRST_COMPLETED)
+            for future in completed:
+                index = futures.pop(future)
+                try:
+                    report = future.result()
+                    entry = _compact_review(report, groups[index]["label"])
+                except Exception as error:
+                    logging.getLogger("omrchecker.review").exception(
+                        "后台批改失败 batch_id=%s index=%s", batch_id, index
+                    )
+                    message = str(error) if isinstance(error, (ValueError, FileNotFoundError, ScanFailure)) else "批改服务暂时失败，请查看服务日志"
+                    entry = {"status": "失败", "label": groups[index]["label"], "review_id": "", "error": message}
+                results[index] = entry
+                with BATCH_REVIEW_LOCK:
+                    latest = json.loads(batch_path.read_text(encoding="utf-8"))
+                    latest["reviews"][index] = entry
+                    latest["completed"] = sum(item.get("status") == "已完成" for item in latest["reviews"])
+                    latest["failed"] = sum(item.get("status") == "失败" for item in latest["reviews"])
+                    latest["message"] = "已完成 {}/{} 份".format(latest["completed"] + latest["failed"], latest["total"])
+                    _write_batch(batch_path, latest)
         successful = [item for item in results if item and item.get("review_id")]
         with BATCH_REVIEW_LOCK:
             batch = json.loads(batch_path.read_text(encoding="utf-8"))
@@ -681,7 +669,10 @@ def start_batch_review(payload):
         "template_id": selected_template["id"],
         "template_name": selected_template["name"],
         "status": "等待中",
-        "message": "正在准备并发批改",
+        "message": "任务已加入批改队列，等待可用并发槽位",
+        "created_at": time.time(),
+        "owner_user_id": str(payload.get("_actor_user_id") or ""),
+        "import_name": str(imported.get("name") or import_id),
         "total": len(groups),
         "completed": 0,
         "failed": 0,
@@ -711,7 +702,6 @@ def read_batch_status(batch_id):
         raise ValueError("批量任务不存在")
     with BATCH_REVIEW_LOCK:
         batch = json.loads(batch_path.read_text(encoding="utf-8"))
-    ai_running = 0
     refreshed_entries = {}
     for index, entry in enumerate(batch.get("reviews", [])):
         review_id = entry.get("review_id")
@@ -724,8 +714,6 @@ def read_batch_status(batch_id):
         refreshed = _compact_review(report, entry.get("label", ""))
         if refreshed != entry:
             refreshed_entries[index] = refreshed
-        if (report.get("ai_judgment") or {}).get("status") == "处理中":
-            ai_running += 1
     if refreshed_entries:
         with BATCH_REVIEW_LOCK:
             latest = json.loads(batch_path.read_text(encoding="utf-8"))
@@ -738,6 +726,9 @@ def read_batch_status(batch_id):
     # Refresh even when the earlier snapshot yielded no changed entries.
     with BATCH_REVIEW_LOCK:
         batch = json.loads(batch_path.read_text(encoding="utf-8"))
+    # Count the latest entries, including groups completed during this read.
+    ai_running = sum((entry.get("ai_judgment") or {}).get("status") == "处理中"
+                     for entry in batch.get("reviews", []))
     batch["ai_processing"] = ai_running
     batch["phase"] = "AI处理中" if ai_running else batch.get("status", "")
     batch["batch_id"] = clean_id
@@ -903,6 +894,39 @@ def read_objective_view(review_id):
     return {"ok": True, "review_id": clean_id, **manifest,
             "asset_base": "/reviews/{}/output/handwriting/objective_view/".format(clean_id)}
 
+
+
+def read_batch_queue(limit=40):
+    """Restore all active workspace tasks and bounded recent completed history."""
+    root = REVIEW_ROOT / "batches"
+    candidates = []
+    if root.is_dir():
+        for path in root.glob("*/batch.json"):
+            try:
+                batch = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(batch, dict):
+                    continue
+                batch_id = str(batch.get("batch_id") or path.parent.name)
+                pending_ai = any((entry.get("ai_judgment") or {}).get("status") == "处理中" for entry in batch.get("reviews", []))
+                active = batch.get("status") in {"等待中", "处理中"} or pending_ai
+                candidates.append((float(batch.get("created_at") or path.stat().st_ctime), batch_id, active))
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                continue
+    tasks, history_count = [], 0
+    history_limit = max(1, min(100, int(limit or 40)))
+    for _created_at, batch_id, active in sorted(candidates, reverse=True):
+        if not active and history_count >= history_limit:
+            continue
+        try:
+            task = read_batch_status(batch_id)
+            task["waiting"] = sum(entry.get("status") == "等待中" for entry in task.get("reviews", []))
+            task["processing"] = sum(entry.get("status") == "处理中" for entry in task.get("reviews", []))
+            tasks.append(task)
+            if not active:
+                history_count += 1
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+    return {"ok": True, "tasks": tasks}
 
 
 def delete_review_job(payload, actor=None, enforce_ownership=None):
@@ -1506,6 +1530,8 @@ class ScanUIHandler(BaseHTTPRequestHandler):
             elif route == "/api/review/status":
                 query = parse_qs(parsed.query)
                 self.send_json(200, read_review_status((query.get("review_id") or [""])[0]))
+            elif route == "/api/review/batch/queue":
+                self.send_json(200, read_batch_queue())
             elif route == "/api/review/batch/status":
                 query = parse_qs(parsed.query)
                 self.send_json(200, read_batch_status((query.get("batch_id") or [""])[0]))

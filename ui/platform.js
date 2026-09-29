@@ -131,7 +131,7 @@
       const actions = element('td'), actionWrap = element('div', 'table-actions');
       const use = element('button', 'text-link', '开始批改'); use.type = 'button';
       use.addEventListener('click', () => {
-        if (reviewState.running) { toast('批改任务正在运行，完成后可切换试卷。'); navigate('grading'); return; }
+        if (reviewState.submitting) { toast('答卷正在提交，请稍后切换试卷。'); navigate('grading'); return; }
         if (!window.platform.confirmSwitch()) return; selectReviewImport(entry.import_id); navigate('grading');
       });
       const download = element('a', 'text-link secondary-link', '下载');
@@ -348,9 +348,10 @@
     $('navPending').hidden = true; renderRecords();
   });
   window.addEventListener('platform:busy', event => {
-    document.querySelectorAll('.process-strip span').forEach((item, index) => item.classList.toggle('active', index <= (event.detail.running ? 2 : ($('reviewCardFiles').files.length ? 1 : 0))));
-    $('reviewScanButton').querySelector('span').textContent = event.detail.running ? '正在批改…' : '开始批改';
-    $('openImport').disabled = event.detail.running;
+    const submitting = Boolean(event.detail.submitting ?? event.detail.running), backgroundRunning = Boolean(event.detail.backgroundRunning);
+    document.querySelectorAll('.process-strip span').forEach((item, index) => item.classList.toggle('active', index <= (submitting ? 2 : (backgroundRunning ? 1 : ($('reviewCardFiles').files.length ? 1 : 0)))));
+    $('reviewScanButton').querySelector('span').textContent = submitting ? '正在提交…' : (backgroundRunning ? '加入下一批' : '加入批改队列');
+    $('openImport').disabled = submitting;
   });
   window.addEventListener('platform:ready', () => { model.ready = true; renderRecords(); loadReviewHistory(); });
   $('reviewResults').addEventListener('input', event => {

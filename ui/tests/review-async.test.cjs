@@ -8,14 +8,16 @@ function response(body,status=200){return {ok:status>=200&&status<300,status,tex
 function fixture(){
   const storage=new Map(),calls={poll:0,stop:0,update:0,render:[],errors:[]};
   const context={
-    reviewState:{batchId:'job-1',batchBusy:false,batchErrors:0,running:true,importId:'exam'},
-    reviewEl:{status:{textContent:''}},
+    reviewState:{batchId:'job-1',batchQueue:[{batch_id:'job-1',status:'处理中',total:1,completed:0,failed:0}],submitting:false,batchBusy:false,batchErrors:0,running:true,importId:'exam'},
+    reviewEl:{status:{textContent:''},concurrency:{value:'2'}},
+    window:{dispatchEvent(){}},CustomEvent:class{constructor(type,init){this.type=type;this.detail=init?.detail}},
     localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},
     renderBatchStatus:value=>calls.render.push(value),startBatchPolling:()=>calls.poll++,stopBatchPolling:()=>calls.stop++,
     updateReviewButton:()=>calls.update++,showError:value=>calls.errors.push(value),
     fetch:async()=>response({ok:true,status:'处理中',total:1,completed:0,failed:0})
   };
   vm.createContext(context);
+  vm.runInContext(source.slice(source.indexOf('function batchTaskActive('),source.indexOf('function buildImportedScoreMap(')),context);
   vm.runInContext(source.slice(source.indexOf('async function readReviewResponse('),source.indexOf('function groupReviewFiles(')),context);
   vm.runInContext(source.slice(source.indexOf('function acceptReviewTask('),source.indexOf('function startBatchPolling(')),context);
   storage.set('omrActiveBatchId','job-1');
@@ -25,7 +27,7 @@ test('accepted single review starts polling and remembers the job',()=>{
  const {context,calls,storage}=fixture();
  assert.equal(context.acceptReviewTask({ok:true,batch_id:'job-2',total:1}),true);
  assert.equal(context.reviewState.running,true);assert.equal(context.reviewState.batchId,'job-2');
- assert.equal(storage.get('omrActiveBatchId'),'job-2');assert.equal(calls.poll,1);
+ assert.deepEqual(JSON.parse(storage.get('omrActiveBatchQueue')),['job-1','job-2']);assert.equal(calls.poll,1);
  assert.match(context.reviewEl.status.textContent,/任务已受理/);
  assert.equal(context.acceptReviewTask({ok:true,review_id:'legacy'}),false);
 });
@@ -58,7 +60,7 @@ test('authentication expiry keeps the task id for restoration after login',async
 test('late progress from an old task cannot overwrite a new task',async()=>{
  const {context,calls}=fixture();let resolve;
  context.fetch=()=>new Promise(r=>resolve=r);
- const pending=context.pollBatchStatus();context.reviewState.batchId='new-job';
+ const pending=context.pollBatchStatus();context.acceptReviewTask({batch_id:'new-job',status:'等待中',total:1});calls.render.length=0;
  resolve(response({ok:true,status:'已完成',total:1,completed:1}));await pending;
  assert.equal(calls.render.length,0);assert.equal(context.reviewState.running,true);assert.equal(calls.stop,0);
 });
@@ -66,7 +68,7 @@ test('page reload restores active task polling before displaying an old review',
  const {context,calls}=fixture();
  vm.runInContext(source.slice(source.indexOf('async function restoreActiveReview('),source.indexOf("reviewEl.confirmGrade.addEventListener")),context);
  await context.restoreActiveReview();assert.equal(calls.poll,1);assert.equal(context.reviewState.batchId,'job-1');
- assert.match(context.reviewEl.status.textContent,/恢复后台批改进度/);
+ assert.match(context.reviewEl.status.textContent,/恢复.*批改/);
 });
 test('single upload click accepts a queued response without rendering an empty report',async()=>{
  const {context,calls}=fixture();let handler;const requests=[];
