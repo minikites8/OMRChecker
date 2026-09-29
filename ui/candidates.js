@@ -1,11 +1,14 @@
 /* Candidate management: each identity remains attached to its own answer-card record. */
 (function () {
   'use strict';
-  function filterCandidates(records,query,filter='all') {
+  function filterCandidates(records,query,filter='all',paperType='all') {
     const search=String(query||'').trim().toLocaleLowerCase();
+    const paper=String(paperType||'all').trim().toUpperCase();
     return records.filter(record=>{
       const confirmed=record.student_name_status==='已确认';
-      return (filter==='all'||(filter==='confirmed'?confirmed:!confirmed)) &&
+      const recordPaper=String(record.paper_type||'').trim().toUpperCase();
+      return (paper==='ALL'||(paper==='PENDING'?recordPaper==='':recordPaper===paper)) &&
+        (filter==='all'||(filter==='confirmed'?confirmed:!confirmed)) &&
         [record.student_name,record.student_id,record.review_id,record.label].some(value=>String(value||'').toLocaleLowerCase().includes(search));
     });
   }
@@ -43,7 +46,7 @@
   function node(tag,className,text){const el=document.createElement(tag);if(className)el.className=className;if(text!==undefined)el.textContent=text;return el;}
   function message(text){$('candidateMessage').textContent=text;}
   function gradeStatus(record){if(record.grade_confirmed)return {label:'成绩已确认',className:'success'};if((record.grade_blockers||[]).length)return {label:'待复核',className:'warning'};return {label:'待确认',className:'warning'};}
-  function filteredRecords(){return sortCandidates(filterCandidates(state.records,candidateSearch.value,candidateFilter.value),$('candidateSort').value);}
+  function filteredRecords(){return sortCandidates(filterCandidates(state.records,candidateSearch.value,candidateFilter.value,$('candidatePaperTypeFilter').value),$('candidateSort').value);}
   async function request(url,payload){
     const response=await fetch(url,payload===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(response.status===404)throw new Error('姓名识别接口待加载，请在原运行终端重启项目。');
@@ -161,6 +164,7 @@
   });
   $('candidateSearch').addEventListener('input',()=>{state.page=1;draw();});
   $('candidateFilter').addEventListener('change',()=>{state.page=1;draw();});
+  $('candidatePaperTypeFilter').addEventListener('change',()=>{state.page=1;draw();});
   $('candidateSort').addEventListener('change',()=>{state.page=1;draw();});
   $('candidatePrevious').addEventListener('click',()=>{state.page--;draw();});
   $('candidateNext').addEventListener('click',()=>{state.page++;draw();});

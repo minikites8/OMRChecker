@@ -36,6 +36,7 @@ function candidateFixture(initialRecords){
   const calls=[],events={},downloads=[],blobs=[],deletions=[];
   let currentRecords=initialRecords,exportReply;
   $('candidateFilter').value='all';
+  $('candidatePaperTypeFilter').value='all';
   const storage=new Map();
   const window={addEventListener:(name,fn)=>events[name]=fn,dispatchEvent:()=>{},confirm:()=>true,reviewDeletion:{isDeleted:()=>false,remove:record=>deletions.push(record.review_id)}};
   const context={document:{getElementById:$,createElement:tag=>new Element(tag),body:new Element('body')},window,
@@ -265,4 +266,78 @@ test('score sorting control is labeled and exposes both directions and default o
   assert.match(html,/for="candidateSort">成绩排序<\/label>/);
   assert.match(html,/value="score_desc">分数从高到低/);assert.match(html,/value="score_asc">分数从低到高/);
   assert.match(html,/id="candidateScoreHeader" aria-sort="none"/);
+});
+
+
+function changePaperTypeFilter(f,value){f.$('candidatePaperTypeFilter').value=value;f.$('candidatePaperTypeFilter').listeners.change();}
+test('paper-type filters select A B C and normalize surrounding spaces and case',()=>{
+  const rows=[{review_id:'a',paper_type:'A'},{review_id:'b',paper_type:' b '},{review_id:'c',paper_type:'C'},{review_id:'pending',paper_type:''}];
+  for(const paper of ['A','B','C'])assert.deepEqual(filterCandidates(rows,'','all',paper).map(r=>r.review_id),[paper.toLowerCase()]);
+  assert.deepEqual(filterCandidates(rows,'','all',' b ').map(r=>r.review_id),['b']);
+  assert.deepEqual(rows.map(r=>r.paper_type),['A',' b ','C','']);
+});
+test('paper-type pending filter includes empty missing null and whitespace values',()=>{
+  const rows=[{review_id:'empty',paper_type:''},{review_id:'missing'},{review_id:'null',paper_type:null},{review_id:'spaces',paper_type:'  '},{review_id:'a',paper_type:'A'}];
+  assert.deepEqual(filterCandidates(rows,'','all','pending').map(r=>r.review_id),['empty','missing','null','spaces']);
+  assert.deepEqual(filterCandidates(rows,''),rows);
+  assert.deepEqual(filterCandidates(rows,'','all','all'),rows);
+});
+test('paper-type filter composes with search and name confirmation',()=>{
+  const rows=[
+    {review_id:'a',paper_type:'A',student_name:'张三',student_name_status:'已确认'},
+    {review_id:'b',paper_type:'B',student_name:'张三',student_id:'001234567890',student_name_status:'已确认'},
+    {review_id:'pending',paper_type:'B',student_name:'张四',student_name_status:'待确认'},
+    {review_id:'other',paper_type:'B',student_name:'李四',student_name_status:'已确认'}
+  ];
+  assert.deepEqual(filterCandidates(rows,'张','confirmed','B').map(r=>r.review_id),['b']);
+  assert.deepEqual(filterCandidates(rows,'张','pending','B').map(r=>r.review_id),['pending']);
+  assert.deepEqual(filterCandidates(rows,'001234','all','B').map(r=>r.review_id),['b']);
+});
+test('changing paper-type filter resets pagination and shows only matching records',async()=>{
+  const rows=Array.from({length:20},(_,i)=>({...scoreRecord('r'+i,i),paper_type:i<10?'A':'B'}));
+  const f=candidateFixture(rows);await f.refresh();f.$('candidateNext').listeners.click();
+  assert.equal(f.$('candidatePage').textContent,'2 / 3 · 20 份');
+  changePaperTypeFilter(f,'B');assert.equal(f.$('candidatePage').textContent,'1 / 2 · 10 份');
+  assert.deepEqual(rowIds(f),rows.slice(10,18).map(r=>r.review_id));
+  f.$('candidateNext').listeners.click();assert.deepEqual(rowIds(f),['r18','r19']);
+  changePaperTypeFilter(f,'C');assert.equal(f.$('candidatePage').textContent,'1 / 1 · 0 份');assert.equal(f.rows().length,0);assert.equal(f.$('candidateSelectAll').disabled,true);
+  changePaperTypeFilter(f,'all');assert.equal(f.$('candidatePage').textContent,'1 / 3 · 20 份');
+});
+test('paper-type UI composes with name status search and score order',async()=>{
+  const rows=[{...scoreRecord('a',90),paper_type:'A',student_name:'同名甲',student_name_status:'已确认'},
+    {...scoreRecord('b-low',10),paper_type:'B',student_name:'同名乙',student_name_status:'已确认'},
+    {...scoreRecord('b-high',80),paper_type:'B',student_name:'同名丙',student_name_status:'已确认'},
+    {...scoreRecord('b-pending',99),paper_type:'B',student_name:'同名丁',student_name_status:'待确认'},
+    {...scoreRecord('c',100),paper_type:'C',student_name:'同名戊',student_name_status:'已确认'}];
+  const f=candidateFixture(rows);await f.refresh();await f.search('同名');
+  f.$('candidateFilter').value='confirmed';f.$('candidateFilter').listeners.change();changeScoreSort(f,'score_desc');changePaperTypeFilter(f,'B');
+  assert.deepEqual(rowIds(f),['b-high','b-low']);assert.equal(f.$('candidateScoreHeader').attributes['aria-sort'],'descending');
+  changeScoreSort(f,'score_asc');assert.deepEqual(rowIds(f),['b-low','b-high']);
+  assert.equal(f.$('candidateSearch').value,'同名');assert.equal(f.$('candidateFilter').value,'confirmed');
+});
+test('paper-type select-all spans filtered pages preserves other selections and exports selected scores',async()=>{
+  const rows=[{...scoreRecord('a',1),paper_type:'A'},...Array.from({length:10},(_,i)=>({...scoreRecord('b'+i,i),paper_type:'B'})),{review_id:'unscored',paper_type:'B'}, {...scoreRecord('c',3),paper_type:'C'}];
+  const f=candidateFixture(rows);await f.refresh();await f.check(0,true);changePaperTypeFilter(f,'B');await f.selectAll(true);
+  assert.equal(f.$('candidateSelectionSummary').textContent,'已选择 11 人');assert.equal(f.$('candidateSelectAll').checked,true);
+  f.$('candidateNext').listeners.click();assert.equal(f.rows()[0].children[0].children[0].checked,true);
+  await f.$('candidateExportJson').listeners.click();
+  const url=f.calls.find(call=>call.url.startsWith('/api/candidates/export.json?')).url;
+  assert.deepEqual(new URLSearchParams(url.split('?')[1]).getAll('review_id'),['a',...Array.from({length:10},(_,i)=>'b'+i)]);
+  await f.selectAll(false);assert.equal(f.$('candidateSelectionSummary').textContent,'已选择 1 人');
+  changePaperTypeFilter(f,'A');assert.equal(f.rows()[0].children[0].children[0].checked,true);
+});
+test('refresh retains paper-type choice and reapplies it to changed records',async()=>{
+  const rows=[{...scoreRecord('a',1),paper_type:'A'},{...scoreRecord('b',2),paper_type:'B'}];
+  const f=candidateFixture(rows);await f.refresh();changePaperTypeFilter(f,'B');assert.deepEqual(rowIds(f),['b']);
+  f.setRecords([{...rows[0],paper_type:'B'},{...rows[1],paper_type:'C'}]);await f.refresh();
+  assert.equal(f.$('candidatePaperTypeFilter').value,'B');assert.deepEqual(rowIds(f),['a']);
+  changePaperTypeFilter(f,'pending');assert.equal(f.rows().length,0);
+  f.setRecords([{...rows[0],paper_type:''},rows[1]]);await f.refresh();assert.deepEqual(rowIds(f),['a']);
+});
+test('paper-type control exposes labeled all A B C and pending options independently of the editor',()=>{
+  const html=fs.readFileSync(path.join(__dirname,'../index.html'),'utf8');
+  assert.match(html,/for="candidatePaperTypeFilter">卷型筛选<\/label>/);
+  const control=html.match(/<select id="candidatePaperTypeFilter" aria-controls="candidateRows">([\s\S]*?)<\/select>/);assert.ok(control);
+  assert.deepEqual([...control[1].matchAll(/<option value="([^"]+)">([^<]+)<\/option>/g)].map(m=>[m[1],m[2]]),[['all','全部卷型'],['A','A 卷'],['B','B 卷'],['C','C 卷'],['pending','卷型待确认']]);
+  assert.equal((html.match(/id="candidatePaperTypeFilter"/g)||[]).length,1);assert.match(html,/id="candidatePaperType"/);
 });
