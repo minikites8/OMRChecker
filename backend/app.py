@@ -402,6 +402,12 @@ def exam_import(request: Request, payload: dict) -> dict:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
+@app.post("/api/exam/regrade")
+def exam_regrade(request: Request, payload: dict) -> JSONResponse:
+    user = current_user(request)
+    return _review_response(request, lambda: legacy.regrade_exam(actor_payload(payload, user)))
+
+
 @app.post("/api/exam/delete")
 def exam_delete(request: Request, payload: dict) -> dict:
     user = current_user(request)

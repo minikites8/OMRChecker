@@ -207,7 +207,7 @@ def test_ui_has_name_delete_confirmation_and_selection_preservation():
     assert "window.confirm('确认删除《'" in js
     assert "loadReviewImports(undefined,true)" in js
     assert "preserveReview&&selectedExists" in js
-    assert "actionWrap.append(use, download, remove)" in platform
+    assert "actionWrap.append(use, regrade, download, remove)" in platform
 
 
 def test_fastapi_storage_failure_returns_retryable_error(monkeypatch):

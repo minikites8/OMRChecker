@@ -108,6 +108,27 @@
     const row = element('tr'), cell = element('td'); cell.colSpan = colspan;
     cell.append(element('div', 'table-empty', message)); row.append(cell); body.replaceChildren(row);
   }
+  async function regradeSavedExam(entry, button) {
+    if (model.regrading || reviewState.submitting) return;
+    if (!window.confirm('重新批改《' + (entry.name || entry.import_id) + '》的全部已保存答卷？系统将更新分值和自动判断，保留人工复核、考生信息及历史结果，成绩需要重新确认。')) return;
+    model.regrading = true; button.disabled = true; button.textContent = '正在重新批改…';
+    try {
+      if (window.reviewAutosave && !(await window.reviewAutosave.flush())) return;
+      const result = await readReviewResponse(await fetch('/api/exam/regrade', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({import_id: entry.import_id})
+      }));
+      const records = (result.reviews || []).filter(record => record.review_id);
+      records.forEach(record => model.records.set(record.review_id, {...model.records.get(record.review_id), ...record}));
+      if (result.total > 0) acceptReviewTask(result);
+      const selected = records.find(record => record.review_id === reviewState.reviewId) || records[0];
+      if (selected) { await loadBatchReview(selected.review_id, false); navigate('results'); }
+      renderRecords();
+      reviewEl.status.textContent = result.message + (result.ai_processing ? '；AI正在重新审核，可在批改队列查看进度。' : '；请复核后重新确认成绩。');
+      toast(result.message);
+    } catch (error) { toast(error.message); }
+    finally { model.regrading = false; button.disabled = false; button.textContent = '重新批改'; }
+  }
   function renderPapers() {
     const filtered = matchingPapers(model.imports, $('paperSearch').value);
     const page = pageSlice(filtered, model.page); model.page = page.page;
@@ -134,6 +155,10 @@
         if (reviewState.submitting) { toast('答卷正在提交，请稍后切换试卷。'); navigate('grading'); return; }
         if (!window.platform.confirmSwitch()) return; selectReviewImport(entry.import_id); navigate('grading');
       });
+      const regrade = element('button', 'text-link', '重新批改'); regrade.type = 'button';
+      regrade.dataset.action = 'regrade-exam';
+      regrade.setAttribute('aria-label', '重新批改试卷 ' + (entry.name || entry.import_id));
+      regrade.addEventListener('click', () => regradeSavedExam(entry, regrade));
       const download = element('a', 'text-link secondary-link', '下载');
       download.href = '/imports/' + encodeURIComponent(entry.import_id) + '/normalized_exam.json'; download.download = '';
       download.setAttribute('aria-label', '下载试卷 ' + entry.import_id);
@@ -144,7 +169,7 @@
         try { await deleteExamImport(entry.import_id, entry.name || entry.import_id); }
         finally { remove.disabled = false; }
       });
-      actionWrap.append(use, download, remove); actions.append(actionWrap); row.append(titleCell, count, total, answers, actions); body.append(row);
+      actionWrap.append(use, regrade, download, remove); actions.append(actionWrap); row.append(titleCell, count, total, answers, actions); body.append(row);
     });
     if (!filtered.length) emptyRow(body, 5, model.imports.length ? '没有匹配的试卷，请调整搜索内容。' : '试卷库为空，点击“导入试卷”开始。');
   }
@@ -241,7 +266,7 @@
     const body = $('recentReviewRows'); body.replaceChildren();
     rows.slice(0, 5).forEach(record => {
       const row = element('tr'), titleCell = element('td');
-      titleCell.append(element('strong', 'table-title', record.student_name ? record.student_name + ' · ' + (record.student_id || '学号待确认') : record.student_id ? '学号 ' + record.student_id : record.label || '答题卡'));
+      titleCell.append(element('strong', 'table-title', record.student_name ? record.student_name + ' · ' + (record.student_id || '学号未识别') : record.student_id ? '学号 ' + record.student_id : record.label || '答题卡'));
       titleCell.append(element('small', 'table-subtitle', record.review_id || '等待识别'));
       const score = record.score_summary || {};
       const scoreCell = element('td', 'numeric', record.review_id ? number(score.total_score) + ' / ' + number(score.possible_score) : '—');

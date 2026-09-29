@@ -31,6 +31,7 @@ from ai_judge import ai_config, ai_is_configured
 from recognition_config import recognition_settings
 from review_deletion import ReviewDeletionError, delete_record, valid_review_id
 from exam_import import import_exam_and_answers
+from exam_regrade import regrade_exam
 from exam_review import apply_ai_review, apply_ai_review_question, apply_manual_review, attach_structured_scores, build_review_from_structured, refresh_rule_judgments, _review_summary, _score_summary, _import_variant_for_review as exam_review_variant_for_review
 from scan_templates import TemplateManager
 from recognition_assets import DEFAULT_SCAN_ROOT, validate_recognition_assets
@@ -1557,7 +1558,7 @@ class ScanUIHandler(BaseHTTPRequestHandler):
         if route.startswith("/api/admin/"):
             self._admin_request("POST")
             return
-        if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/sheets/preview", "/api/exam/import", "/api/exam/delete", "/api/review", "/api/review/batch", "/api/review/ai-judge", "/api/review/ai-judge-question", "/api/review/confirm", "/api/review/confirm-grade", "/api/review/delete", "/api/candidates/delete", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
+        if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/sheets/preview", "/api/exam/import", "/api/exam/delete", "/api/exam/regrade", "/api/review", "/api/review/batch", "/api/review/ai-judge", "/api/review/ai-judge-question", "/api/review/confirm", "/api/review/confirm-grade", "/api/review/delete", "/api/candidates/delete", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
             self.send_json(404, {"ok": False, "error": "接口不存在"})
             return
         if route != "/api/auth/login" and not self._authorize(route):
@@ -1590,6 +1591,8 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                 result = CANDIDATE_MANAGER.start(payload)
             elif route == "/api/exam/import":
                 result = run_exam_import(payload)
+            elif route == "/api/exam/regrade":
+                result = regrade_exam(payload)
             elif route == "/api/exam/delete":
                 result = delete_exam_import(payload)
             elif route == "/api/sheets/preview":
