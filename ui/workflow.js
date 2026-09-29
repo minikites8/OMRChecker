@@ -40,7 +40,7 @@
   }
   function persistPreferences() {
     preferences = {importId:$('reviewImportSelect').value, concurrency:$('reviewConcurrency').value};
-    try { localStorage.setItem('omrWorkflowPreferences', JSON.stringify(preferences)); } catch (_) {}
+    try { (globalThis.omrWorkspaceStorage || localStorage).setItem('omrWorkflowPreferences', JSON.stringify(preferences)); } catch (_) {}
   }
   function feedbackFor(result) {
     const messages = [];

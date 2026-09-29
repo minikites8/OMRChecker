@@ -55,12 +55,12 @@ def _clean_text(value, default, maximum):
     return (text or default)[:maximum]
 
 
-def normalize_sheet_spec(payload):
+def _normalize_legacy_sheet_spec(payload):
     payload = payload or {}
     spec = SheetSpec(
         title=_clean_text(payload.get("title"), SheetSpec.title, 48),
         subtitle=_clean_text(payload.get("subtitle"), SheetSpec.subtitle, 120),
-        id_digits=_bounded_int(payload.get("id_digits"), "学号位数", 4, 12, 8),
+        id_digits=_bounded_int(payload.get("id_digits"), "学号位数", 6, 12, 12),
         mcq_count=_bounded_int(payload.get("mcq_count"), "选择题数量", 0, 5, 5),
         mcq_choices=_bounded_int(payload.get("mcq_choices"), "选择题选项数", 2, 5, 4),
         tf_count=_bounded_int(payload.get("tf_count"), "判断题数量", 0, 5, 5),
@@ -72,6 +72,19 @@ def normalize_sheet_spec(payload):
     if spec.mcq_count + spec.tf_count + spec.text_count == 0:
         raise ValueError("至少保留一种题型")
     return spec
+
+
+def _legacy_payload(payload):
+    return isinstance(payload, dict) and "sections" not in payload and any(
+        key in payload for key in ("mcq_count", "tf_count", "text_count")
+    )
+
+
+def normalize_sheet_spec(payload):
+    if _legacy_payload(payload):
+        return _normalize_legacy_sheet_spec(payload)
+    from adaptive_sheet_designer import normalize_card_spec
+    return normalize_card_spec(payload)
 
 
 def _register_fonts():
@@ -344,7 +357,10 @@ def render_reference(pdf_path, png_path):
 
 
 def generate_sheet_package(payload, output_root=DEFAULT_OUTPUT_ROOT):
-    spec = normalize_sheet_spec(payload)
+    if not _legacy_payload(payload):
+        from adaptive_sheet_designer import generate_card_package
+        return generate_card_package(payload, output_root)
+    spec = _normalize_legacy_sheet_spec(payload)
     sheet_id = "{}-{}".format(
         datetime.now().strftime("%Y%m%d-%H%M%S"), uuid.uuid4().hex[:6]
     )

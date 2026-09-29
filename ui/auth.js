@@ -5,7 +5,13 @@ window.omrSessionReady = (async function () {
     const result = await response.json();
     window.omrSession = result;
     window.dispatchEvent(new CustomEvent('platform:session', { detail: result }));
-    if (result.auth?.auth_mode !== 'disabled' && !result.authenticated) window.location.replace('/login.html');
+    if (result.auth?.auth_mode !== 'disabled' && !result.authenticated) {
+      window.location.replace('/login.html?next=' + encodeURIComponent(window.location.pathname));
+    } else if (!window.omrWorkspaceId) {
+      const pending = sessionStorage.getItem('omrLoginNext');
+      const next = /^\/(?:join\/[A-Za-z0-9_-]{43}\/?|w\/(?:[a-f0-9]{32}|shared)\/?|workspaces(?:\?manage=(?:[a-f0-9]{32}|shared))?)$/.test(pending || '') ? pending : '/workspaces';
+      window.location.replace(next);
+    }
     return result;
   } catch (error) {
     window.omrSession = { authenticated: false, user: null };

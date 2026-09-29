@@ -1,3 +1,4 @@
+from workspace_context import bind_context
 """Candidate records backed by reviews; name recognition uses vision AI."""
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -158,7 +159,7 @@ class CandidateManager:
             self.job={'status':'处理中' if identifiers else '已完成','total':len(identifiers),
                       'completed':0,'failed':0,'message':'正在识别姓名…' if identifiers else '姓名记录已更新'}
             self.pending_review_ids=set(identifiers)
-            if identifiers:self.future=self.executor.submit(self._run,identifiers)
+            if identifiers:self.future=self.executor.submit(bind_context(self._run),identifiers)
             return {'ok':True,'name_job':dict(self.job)}
 
     def is_recognizing(self, identifier):

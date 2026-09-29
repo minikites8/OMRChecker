@@ -22,7 +22,8 @@ def test_saas_shell_keeps_unique_ids_and_existing_app_entrypoints():
     assert {"accountMenu", "serviceMenu", "accountAdmin", "accountLogout", "storageStatus", "welcomeTitle", "workspaceDate"} <= set(ids)
     scripts = [attrs["src"] for tag, attrs in page.elements if tag == "script"]
     assert scripts[0].startswith("/static/platform.js")
-    assert scripts[-1].startswith("/static/app.js")
+    assert any(src.startswith("/static/app.js") for src in scripts)
+    assert any(src.startswith("/static/sheet-designer.js") for src in scripts)
     assert any(src.startswith("/static/saas.js") for src in scripts)
     assert any(src.startswith("/static/admin.js") for src in scripts)
 

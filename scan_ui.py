@@ -26,6 +26,7 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 from urllib.request import urlopen
 
 from sheet_designer import generate_sheet_package
+from adaptive_sheet_designer import preview_sheet, sheet_presets
 from ai_judge import ai_config, ai_is_configured
 from recognition_config import recognition_settings
 from review_deletion import ReviewDeletionError, delete_record, valid_review_id
@@ -43,33 +44,38 @@ from platform_persistence import PlatformPersistence
 from review_collaboration import (SharedReviewLock, ReviewConflict, ReviewPreconditionRequired,
     attach_collaboration, check_decisions, check_revision, question_revision, record_action)
 
+from platform_workspaces import WorkspaceStore
+from workspace_context import WorkspacePath, WorkspaceResource, WorkspaceWorkers, bind_context, scoped_payload
+from workspace_http import workspace_request
+
 PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_ROOT = Path(get_setting("OMR_DATA_ROOT", str(PROJECT_ROOT))).expanduser().resolve()
 UI_ROOT = PROJECT_ROOT / "ui"
 TEMPLATE_ROOT = DEFAULT_SCAN_ROOT
-TEMPLATE_MANAGER = TemplateManager(
+TEMPLATE_MANAGER = WorkspaceResource(lambda: TemplateManager(
     PROJECT_ROOT,
     TEMPLATE_ROOT,
-    storage_root=DATA_ROOT / "inputs" / "scan_templates",
-)
-JOBS_ROOT = DATA_ROOT / "outputs" / "scan_ui"
-SHEETS_ROOT = DATA_ROOT / "output" / "pdf" / "web_designer"
-REVIEW_ROOT = DATA_ROOT / "outputs" / "answer_review"
-IMPORT_ROOT = DATA_ROOT / "outputs" / "exam_imports"
+    storage_root=Path(WorkspacePath(DATA_ROOT, "inputs/scan_templates")),
+))
+JOBS_ROOT = WorkspacePath(DATA_ROOT, "outputs/scan_ui")
+SHEETS_ROOT = WorkspacePath(DATA_ROOT, "output/pdf/web_designer")
+REVIEW_ROOT = WorkspacePath(DATA_ROOT, "outputs/answer_review")
+IMPORT_ROOT = WorkspacePath(DATA_ROOT, "outputs/exam_imports")
 PLATFORM_SETTINGS = PlatformSettings.from_env()
 PLATFORM_DATABASE = PostgresStore(PLATFORM_SETTINGS.database_url)
 PLATFORM_COS = TencentCosStorage(PLATFORM_SETTINGS)
 PLATFORM_PERSISTENCE = PlatformPersistence(PLATFORM_SETTINGS, PLATFORM_DATABASE, PLATFORM_COS)
 AUTH_SERVICE = AuthService(PLATFORM_SETTINGS, PLATFORM_DATABASE)
+WORKSPACES = WorkspaceStore(DATA_ROOT, PLATFORM_DATABASE, PLATFORM_SETTINGS.public_base_url)
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".pdf"}
 MAX_REQUEST_BYTES = int(get_setting("OMR_MAX_REQUEST_MB", "256")) * 1024 * 1024
 MAX_FILE_BYTES = int(get_setting("OMR_MAX_FILE_MB", "24")) * 1024 * 1024
 EXAM_IMPORT_LOCK = threading.RLock()
 AI_REVIEW_LOCK = SharedReviewLock(lambda: REVIEW_ROOT / ".collaboration.lock")
 BATCH_REVIEW_LOCK = threading.RLock()
-AI_REVIEW_WORKERS = {}
-AI_QUESTION_WORKERS = {}
-BATCH_REVIEW_WORKERS = {}
+AI_REVIEW_WORKERS = WorkspaceWorkers()
+AI_QUESTION_WORKERS = WorkspaceWorkers()
+BATCH_REVIEW_WORKERS = WorkspaceWorkers()
 
 
 def _configured_workers(name, default, maximum=4):
@@ -598,7 +604,7 @@ def _batch_review_worker(batch_id, import_id, normalized_path, imported, groups,
                 )
 
         futures = {
-            REVIEW_EXECUTOR.submit(run_group, index, group): index
+            REVIEW_EXECUTOR.submit(bind_context(run_group), index, group): index
             for index, group in enumerate(groups)
         }
         for future in as_completed(futures):
@@ -689,7 +695,7 @@ def start_batch_review(payload):
     with BATCH_REVIEW_LOCK:
         _write_batch(batch_path, batch)
         worker = threading.Thread(
-            target=_batch_review_worker,
+            target=bind_context(_batch_review_worker),
             args=(batch_id, import_id, normalized_path, imported, groups, concurrency, selected_template["id"], str(payload.get("_actor_user_id") or ""), settings["local_ocr_enabled"]),
             daemon=True,
             name="omr-batch-{}".format(batch_id),
@@ -1174,7 +1180,7 @@ def start_ai_question_review(payload):
             _set_review_unconfirmed(review)
             _write_review(review_path, review)
             AI_QUESTION_WORKERS[key] = AI_REVIEW_EXECUTOR.submit(
-                _ai_question_worker, review_id, question
+                bind_context(_ai_question_worker), review_id, question
             )
             review["report_url"] = "/reviews/{}/output/review.json".format(review_id)
             return review
@@ -1211,7 +1217,7 @@ def start_ai_review(payload):
                 review["ai_judgment"] = {"status": "处理中", "enabled": True, "processed": 0, "group_count": 0, "completed_groups": 0, "current_group": "", "error_groups": 0, "message": "正在等待 AI 并发队列"}
                 _write_review(review_path, review)
                 AI_REVIEW_WORKERS[review_id] = AI_REVIEW_EXECUTOR.submit(
-                    _ai_review_worker, review_id
+                    bind_context(_ai_review_worker), review_id
                 )
     review["report_url"] = "/reviews/{}/output/review.json".format(review_id)
     return review
@@ -1283,8 +1289,8 @@ def run_scan_job(files=None, demo=False, template_id=None, owner_user_id="", loc
 
 
 from candidate_manager import CandidateManager, grade_confirmation_blockers
-CANDIDATE_MANAGER = CandidateManager(lambda: REVIEW_ROOT, _load_review, _write_review,
-                                     AI_REVIEW_LOCK, read_objective_view)
+CANDIDATE_MANAGER = WorkspaceResource(lambda: CandidateManager(lambda: REVIEW_ROOT, _load_review, _write_review,
+                                     AI_REVIEW_LOCK, read_objective_view))
 
 
 class ScanUIHandler(BaseHTTPRequestHandler):
@@ -1304,7 +1310,7 @@ class ScanUIHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def send_json(self, status, payload, headers=None):
-        content = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        content = json.dumps(scoped_payload(payload), ensure_ascii=False).encode("utf-8")
         self.send_bytes(status, content, "application/json; charset=utf-8", headers=headers)
 
     def send_redirect(self, location, headers=None):
@@ -1396,12 +1402,14 @@ class ScanUIHandler(BaseHTTPRequestHandler):
         except Exception:
             self.send_json(503, {"ok": False, "error": "管理服务暂时繁忙，请稍后重试"}, {"Cache-Control": "no-store"})
 
+    @workspace_request
     def do_PATCH(self):
         if urlparse(self.path).path.startswith("/api/admin/"):
             self._admin_request("PATCH")
         else:
             self.send_json(404, {"ok": False, "error": "接口不存在"})
 
+    @workspace_request
     def do_GET(self):
         parsed = urlparse(self.path)
         route = parsed.path
@@ -1453,6 +1461,8 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                     "platform": PLATFORM_SETTINGS.public_config(),
                     "persistence": PLATFORM_PERSISTENCE.health(),
                 })
+            elif route == "/api/sheets/presets":
+                self.send_json(200, sheet_presets())
             elif route == "/api/templates":
                 self.send_json(200, TEMPLATE_MANAGER.list())
             elif route == "/api/candidates":
@@ -1489,12 +1499,13 @@ class ScanUIHandler(BaseHTTPRequestHandler):
             self.send_json(401, {"ok": False, "error": str(error), "login_url": "/login"})
         except ValueError as error:
             self.send_json(400, {"ok": False, "error": str(error)})
+    @workspace_request
     def do_POST(self):
         route = urlparse(self.path).path
         if route.startswith("/api/admin/"):
             self._admin_request("POST")
             return
-        if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/exam/import", "/api/exam/delete", "/api/review", "/api/review/batch", "/api/review/ai-judge", "/api/review/ai-judge-question", "/api/review/confirm", "/api/review/confirm-grade", "/api/review/delete", "/api/candidates/delete", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
+        if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/sheets/preview", "/api/exam/import", "/api/exam/delete", "/api/review", "/api/review/batch", "/api/review/ai-judge", "/api/review/ai-judge-question", "/api/review/confirm", "/api/review/confirm-grade", "/api/review/delete", "/api/candidates/delete", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
             self.send_json(404, {"ok": False, "error": "接口不存在"})
             return
         if route != "/api/auth/login" and not self._authorize(route):
@@ -1529,11 +1540,15 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                 result = run_exam_import(payload)
             elif route == "/api/exam/delete":
                 result = delete_exam_import(payload)
+            elif route == "/api/sheets/preview":
+                result = preview_sheet(payload)
             elif route == "/api/sheets":
                 package = generate_sheet_package(payload, output_root=SHEETS_ROOT)
                 result = {
                     "ok": True,
                     "sheet_id": package["sheet_id"],
+                    "page_count": package.get("page_count", 1),
+                    "question_count": package.get("question_count"),
                     "spec": package["spec"],
                     "pdf_url": sheet_url(package["pdf_path"]),
                     "template_url": sheet_url(package["template_path"]),
@@ -1592,10 +1607,26 @@ def create_server(host="127.0.0.1", port=8765):
     raise last_error
 
 
+def initialize_workspaces():
+    WORKSPACES.ensure_schema()
+    roots = (DATA_ROOT / 'outputs/answer_review', DATA_ROOT / 'outputs/exam_imports',
+             DATA_ROOT / 'outputs/scan_ui', DATA_ROOT / 'output/pdf/web_designer', DATA_ROOT / 'inputs/scan_templates')
+    if not any(root.exists() and any(root.iterdir()) for root in roots):
+        return
+    if AUTH_SERVICE.enabled:
+        with PLATFORM_DATABASE.connection() as connection:
+            users = [dict(row) for row in connection.execute(
+                'SELECT id,email,display_name,role FROM app_users WHERE is_active=TRUE ORDER BY created_at,id').fetchall()]
+    else:
+        users = [AUTH_SERVICE.user_from_headers('')]
+    WORKSPACES.migrate_shared(users)
+
+
 def run_server(host="127.0.0.1", port=8765, open_browser=False):
     validate_recognition_assets(PROJECT_ROOT)
     AUTH_SERVICE.startup()
     PLATFORM_PERSISTENCE.startup()
+    initialize_workspaces()
     DATA_ROOT.mkdir(parents=True, exist_ok=True)
     UI_ROOT.mkdir(parents=True, exist_ok=True)
     JOBS_ROOT.mkdir(parents=True, exist_ok=True)

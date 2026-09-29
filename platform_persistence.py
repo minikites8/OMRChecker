@@ -47,7 +47,12 @@ class PlatformPersistence:
         safe_path = "/".join(
             re.sub(r"[^A-Za-z0-9._-]+", "-", part) for part in Path(relative_path).parts
         )
-        return f"{self.settings.cos_prefix}/{safe_kind}/{safe_path}"
+        from workspace_context import current_workspace
+        workspace = current_workspace()
+        prefix = self.settings.cos_prefix
+        if workspace and workspace["id"] != "shared":
+            prefix += "/workspaces/" + workspace["id"]
+        return f"{prefix}/{safe_kind}/{safe_path}"
 
     def sync_file(self, path: Path, kind: str, owner_user_id: str = "", relative_path: Optional[Path] = None) -> str:
         if not self.enabled:
@@ -79,6 +84,12 @@ class PlatformPersistence:
 
     def record_job(self, job_id: str, owner_user_id: str, kind: str, status: str, payload: dict) -> None:
         if self.enabled:
+            from workspace_context import current_workspace
+            workspace = current_workspace()
+            if workspace:
+                payload = {**payload, "workspace_id": workspace["id"]}
+            if workspace and workspace['id'] != 'shared':
+                job_id = workspace['id'] + ':' + job_id
             self.database.record_job(job_id, owner_user_id, kind, status, payload)
 
 
@@ -88,4 +99,7 @@ class PlatformPersistence:
         if self.enabled:
             prefix = self._key("review", Path(review_id)) + "/"
             self.cos.delete_prefix(prefix)
-            self.database.delete_review_artifacts(review_id, prefix)
+            from workspace_context import current_workspace
+            workspace = current_workspace()
+            record_id = workspace['id'] + ':' + review_id if workspace and workspace['id'] != 'shared' else review_id
+            self.database.delete_review_artifacts(record_id, prefix)

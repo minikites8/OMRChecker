@@ -35,6 +35,9 @@ database = PostgresStore(settings.database_url)
 cos = TencentCosStorage(settings)
 persistence = PlatformPersistence(settings, database, cos)
 auth = AuthService(settings, database)
+from platform_workspaces import WorkspaceStore
+from workspace_http import install_fastapi_workspaces
+workspaces = WorkspaceStore(legacy.DATA_ROOT, database, settings.public_base_url)
 
 app = FastAPI(title="OMRChecker API", version="0.1.0")
 origins = [item.strip() for item in get_setting("FRONTEND_ORIGINS", "http://localhost:8765").split(",") if item.strip()]
@@ -126,6 +129,7 @@ def startup() -> None:
     validate_recognition_assets(legacy.PROJECT_ROOT)
     auth.startup()
     persistence.startup()
+    legacy.initialize_workspaces()
 
 
 @app.get("/api/health")
@@ -342,13 +346,33 @@ def demo(request: Request, payload: dict) -> dict:
     return legacy.run_scan_job([], True, payload.get("template_id"), str(user.get("id") or user.get("sub") or ""), local_ocr_enabled=payload.get("local_ocr_enabled"))
 
 
+@app.get("/api/sheets/presets")
+def sheet_presets(request: Request) -> dict:
+    current_user(request)
+    return legacy.sheet_presets()
+
+
+@app.post("/api/sheets/preview")
+def sheet_preview(request: Request, payload: dict) -> dict:
+    current_user(request)
+    try:
+        return legacy.preview_sheet(payload)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+
+
 @app.post("/api/sheets")
 def sheets(request: Request, payload: dict) -> dict:
     current_user(request)
-    package = legacy.generate_sheet_package(payload, output_root=legacy.SHEETS_ROOT)
+    try:
+        package = legacy.generate_sheet_package(payload, output_root=legacy.SHEETS_ROOT)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
     return {
         "ok": True,
         "sheet_id": package["sheet_id"],
+        "page_count": package.get("page_count", 1),
+        "question_count": package.get("question_count"),
         "spec": package["spec"],
         "pdf_url": legacy.sheet_url(package["pdf_path"]),
         "template_url": legacy.sheet_url(package["template_path"]),
@@ -477,3 +501,6 @@ def artifact(asset_type: str, asset_path: str, request: Request):
     if not path.is_file():
         raise HTTPException(status_code=404, detail="文件不存在")
     return FileResponse(path)
+
+
+install_fastapi_workspaces(app, legacy, lambda request: current_user(request), lambda: workspaces, lambda: auth.enabled)

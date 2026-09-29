@@ -1,6 +1,10 @@
 (function () {
   'use strict';
   const $ = id => document.getElementById(id);
+  const requestedNext = new URLSearchParams(location.search).get('next') || sessionStorage.getItem('omrLoginNext');
+  const loginTarget = /^\/(?:join\/[A-Za-z0-9_-]{43}\/?|w\/(?:[a-f0-9]{32}|shared)\/?|workspaces(?:\?manage=(?:[a-f0-9]{32}|shared))?)$/.test(requestedNext || '') ? requestedNext : '/workspaces';
+  sessionStorage.setItem('omrLoginNext', loginTarget);
+
   const form = $('loginForm'), message = $('loginMessage'), oidc = $('oidcLogin');
   let submitting = false, loading = false;
   if (window.omrApiUrl) oidc.href = window.omrApiUrl('/auth/oidc/start');
@@ -12,7 +16,7 @@
       const response = await fetch('/api/session', { credentials: 'include', cache: 'no-store' });
       if (!response.ok) throw new Error('登录服务暂时不可用，请重新连接。');
       const result = await response.json();
-      if (result.authenticated) { window.location.replace('/'); return; }
+      if (result.authenticated) { window.location.replace(loginTarget); return; }
       const auth = result.auth;
       if (!auth || (!auth.oidc_enabled && !auth.builtin_enabled)) throw new Error('登录方式待配置，请联系平台管理员。');
       oidc.hidden = !auth.oidc_enabled;
@@ -47,7 +51,7 @@
       });
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || result.detail || '登录失败，请检查账号信息。');
-      window.location.replace('/');
+      window.location.replace(loginTarget);
     } catch (error) {
       message.textContent = error instanceof TypeError || error instanceof SyntaxError ? '登录请求失败，请稍后重试。' : error.message || '登录请求失败，请稍后重试。';
     } finally {

@@ -220,7 +220,7 @@ def test_authenticated_api_requires_login(monkeypatch, route):
     assert client.post(route, json={"review_id": "private"}).status_code == 401
 
 
-def test_legacy_authenticated_service_uses_same_conflict_protocol(shared, monkeypatch):
+def test_legacy_authenticated_service_uses_same_conflict_protocol(shared, monkeypatch, tmp_path):
     from types import SimpleNamespace
     from urllib.request import Request, urlopen
     from urllib.error import HTTPError
@@ -231,9 +231,13 @@ def test_legacy_authenticated_service_uses_same_conflict_protocol(shared, monkey
     server = scan_ui.create_server("127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+    from platform_workspaces import WorkspaceStore
+    workspaces = WorkspaceStore(tmp_path / 'tenant-metadata')
+    workspaces.migrate_shared([{'id': 'teacher-a'}, {'id': 'teacher-b'}])
+    monkeypatch.setattr(scan_ui, 'WORKSPACES', workspaces)
     base = "http://127.0.0.1:" + str(server.server_address[1])
     def post(payload, actor):
-        request = Request(base + "/api/review/confirm", data=json.dumps(payload).encode("utf-8"),
+        request = Request(base + "/w/shared/api/review/confirm", data=json.dumps(payload).encode("utf-8"),
                           headers={"Content-Type": "application/json", "Cookie": actor})
         with urlopen(request, timeout=5) as response:
             return json.load(response)

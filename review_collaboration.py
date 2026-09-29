@@ -120,7 +120,9 @@ def describe_review(review):
     grade = {key: review.get(key) for key in (
         "student_name", "student_id", "identity_status", "paper_type", "answer_paper_type",
         "score_summary", "grade_confirmed", "grade_confirmed_at", "grade_confirmed_by")}
-    return {"workspace_id": "shared", "workspace_name": "共享阅卷工作区",
+    from workspace_context import current_workspace
+    workspace = current_workspace() or {"id": "shared", "name": "共享阅卷工作区"}
+    return {"workspace_id": workspace["id"], "workspace_name": workspace["name"],
             "revision": _digest({"questions": questions, "grade": grade}),
             "questions": questions, "last_action": (review.get("review_activity") or [None])[-1]}
 

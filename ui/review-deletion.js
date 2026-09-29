@@ -37,7 +37,7 @@
     },
     notify: id => {
       ['omrActiveReviewId', 'omrCandidateReviewId'].forEach(key => {
-        if (localStorage.getItem(key) === id) localStorage.removeItem(key);
+        if ((globalThis.omrWorkspaceStorage || localStorage).getItem(key) === id) (globalThis.omrWorkspaceStorage || localStorage).removeItem(key);
       });
       window.dispatchEvent(new CustomEvent('platform:review-deleted', { detail: { review_id: id } }));
     }

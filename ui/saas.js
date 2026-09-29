@@ -44,7 +44,7 @@
     $('adminSystemStatus').hidden = !user.admin;
     $('accountLogout').hidden = !user.authenticated;
     $('accountLogin').hidden = user.authenticated;
-    $('workspaceRole').textContent = user.authenticated ? user.role + ' · 共享工作区' : '等待登录状态';
+    if (!window.omrCurrentWorkspace) $('workspaceRole').textContent = user.authenticated ? '正在读取工作区' : '等待登录状态';
     $('welcomeTitle').textContent = user.authenticated ? user.name + '，欢迎回来' : '让每一次批改更有条理';
     renderHealth();
   }

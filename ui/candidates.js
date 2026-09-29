@@ -80,7 +80,7 @@
   function selectRecord(record){
     if(state.saving||state.selected===record.review_id)return;
     if(state.selected!==record.review_id&&state.dirty&&!window.confirm('考生信息尚未保存，确认切换记录？'))return;
-    state.selected=record.review_id;state.dirty=false;localStorage.setItem('omrCandidateReviewId',state.selected);draw();drawDetails(true);
+    state.selected=record.review_id;state.dirty=false;(globalThis.omrWorkspaceStorage || localStorage).setItem('omrCandidateReviewId',state.selected);draw();drawDetails(true);
   }
   function draw(){
     $('candidateScoreHeader').setAttribute('aria-sort',({score_desc:'descending',score_asc:'ascending'})[$('candidateSort').value]||'none');
@@ -134,11 +134,11 @@
     try{
       const result=await request('/api/candidates');if(sequence!==state.sequence)return;
       state.records=(result.candidates||[]).filter(record=>!window.reviewDeletion?.isDeleted(record.review_id));
-      if(!state.selected)state.selected=localStorage.getItem('omrCandidateReviewId')||localStorage.getItem('omrActiveReviewId')||state.records[0]?.review_id||'';
+      if(!state.selected)state.selected=(globalThis.omrWorkspaceStorage || localStorage).getItem('omrCandidateReviewId')||(globalThis.omrWorkspaceStorage || localStorage).getItem('omrActiveReviewId')||state.records[0]?.review_id||'';
       if(!selected()){state.selected=state.records[0]?.review_id||'';state.dirty=false;}
       state.loading=false;draw();drawJob(result.name_job);
       message(result.skipped?'有 '+result.skipped+' 份记录读取异常，其余记录已加载。':'');
-      const active=state.records.find(record=>record.review_id===localStorage.getItem('omrActiveReviewId'));
+      const active=state.records.find(record=>record.review_id===(globalThis.omrWorkspaceStorage || localStorage).getItem('omrActiveReviewId'));
       if(active)window.dispatchEvent(new CustomEvent('platform:identity',{detail:active}));
     }catch(error){state.loading=false;draw();message(error.message);clearTimeout(state.timer);if(state.job?.status==='处理中')state.timer=setTimeout(()=>refresh(false),3000);}
     finally{if(sequence===state.sequence){state.loading=false;$('candidateRefresh').disabled=false;$('candidateRecognizeAll').disabled=state.job?.status==='处理中';}}

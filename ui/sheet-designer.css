@@ -1,0 +1,46 @@
+/* Scoped answer-card builder; existing grading and navigation retain their styles. */
+#sheetBuilder.adaptive-builder{grid-template-columns:minmax(340px,1fr) minmax(340px,1fr);align-items:start;gap:24px}
+#sheetBuilder .builder-copy h2{font-size:25px;letter-spacing:0}
+#sheetBuilder .builder-form{grid-template-columns:1fr 1fr;gap:12px}
+#sheetBuilder .field-wide{grid-column:1/-1}
+#sheetBuilder .field input,#sheetBuilder .field select{width:100%;min-width:0}
+#sheetBuilder .sheet-identity-options{display:flex;flex-wrap:wrap;gap:8px 12px;align-content:start}
+#sheetBuilder .sheet-identity-options>span{flex-basis:100%}
+#sheetBuilder .sheet-identity-options label{display:flex;align-items:center;gap:5px;font-size:12px;white-space:nowrap}
+#sheetBuilder .sheet-identity-options input{width:14px;height:14px;min-height:14px;margin:0;padding:0;accent-color:#5278ff}
+#sheetBuilder .sheet-identity-options label{min-height:22px;flex-basis:100%}
+.sheet-section-heading{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:22px 0 8px}
+.sheet-section-heading h3{font-size:15px;margin:0;color:#334a6b}
+.sheet-section-heading>span{font-size:12px;color:#5278ff}
+#sheetBuilder .sheet-help{font-size:11px;color:#75849c;line-height:1.7;margin:8px 0 12px}
+.sheet-sections{display:grid;gap:10px}
+.sheet-section{padding:12px;border:1px solid #dfe6f3;border-radius:8px;background:#fcfdff}
+.sheet-section-top{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:9px}
+.sheet-section-range{font-size:12px;color:#5a7093}
+.sheet-section-actions{display:flex;gap:4px}
+.sheet-section-actions button{min-width:30px;min-height:30px;padding:3px 7px;border:1px solid #e1e7f0;border-radius:5px;background:#fff;color:#556d94;cursor:pointer;font-size:12px}
+.sheet-section-actions button:disabled{opacity:.4;cursor:default}
+.sheet-section-fields{display:grid;grid-template-columns:1fr 82px;gap:9px}
+.sheet-section-fields .field{margin:0;min-width:0}
+.sheet-section-fields .field>span{font-size:11px}
+.sheet-section-fields input,.sheet-section-fields select{height:34px;padding:6px 8px!important;font-size:12px}
+.sheet-section-fields .section-title{grid-column:1/-1}
+.sheet-add-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:14px;font-size:12px}
+.sheet-add-row select{flex:1;min-width:110px;padding:9px;border:1px solid #dfe6f3;border-radius:6px;background:#fff;color:#445d82}
+.sheet-add-row .button{padding:9px 12px;font-size:12px;min-height:36px}
+.sheet-validation{margin-top:10px;color:#b84744;font-size:12px;line-height:1.6}
+.sheet-validation:empty{display:none}
+#sheetBuilder .builder-actions{gap:12px;align-items:center}
+#sheetBuilder .builder-status{margin:12px 0;line-height:1.7}
+#sheetBuilder .builder-preview{position:sticky;top:16px;width:100%;max-width:none;margin:0;padding:14px;min-width:0}
+#sheetBuilder .builder-preview-head{padding:0;align-items:center}
+#sheetBuilder .builder-preview-head strong{max-width:180px}
+.sheet-preview-status{font-size:12px;color:#667c9e;margin:8px 0 12px;min-height:18px;line-height:1.5}
+.sheet-preview-pages{display:grid;gap:18px;max-height:78vh;overflow:auto;scrollbar-gutter:stable;min-height:200px;padding:3px 5px 10px}
+.sheet-preview-pages[data-stale="true"] img{opacity:.55}
+.sheet-preview-pages figure{margin:0;min-width:0}
+.sheet-preview-pages img{display:block;width:100%;height:auto;aspect-ratio:210/297;background:white;border:1px solid #dce3ed;box-shadow:0 4px 16px #233b5b12}
+.sheet-preview-pages figcaption{text-align:center;color:#8090a8;font-size:11px;margin-top:7px}
+#sheetBuilder :is(button,input,select,a):focus-visible{outline:2px solid #5278ff;outline-offset:3px}
+@media(max-width:1120px){#sheetBuilder.adaptive-builder{grid-template-columns:1fr}#sheetBuilder .builder-preview{position:static}.sheet-preview-pages{max-height:80vh;max-width:620px;margin:auto}}
+@media(max-width:520px){#sheetBuilder.adaptive-builder{padding:16px}#sheetBuilder .builder-form{grid-template-columns:1fr}.sheet-section-fields{grid-template-columns:1fr 76px}#sheetBuilder .builder-actions{align-items:stretch}#sheetBuilder .builder-actions .button{font-size:12px;min-width:0}.sheet-preview-pages{max-height:65vh}.sheet-section-actions button{min-height:34px}}

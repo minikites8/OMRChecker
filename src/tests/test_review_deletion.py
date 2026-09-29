@@ -190,11 +190,16 @@ def test_batch_refresh_discards_predelete_snapshot(service, monkeypatch):
 
 
 @pytest.fixture(params=['legacy', 'fastapi'])
-def http_client(request, service, monkeypatch):
+def http_client(request, service, monkeypatch, tmp_path):
     from backend import app as api
     users = {'teacher': {'id': 'teacher', 'role': 'teacher'}, 'other': {'id': 'other', 'role': 'teacher'}, 'admin': {'id': 'admin', 'role': 'admin'}}
     auth = SimpleNamespace(enabled=True, user_from_headers=lambda cookie: users.get(cookie))
     monkeypatch.setattr(service, 'AUTH_SERVICE', auth); monkeypatch.setattr(api, 'auth', auth)
+    from platform_workspaces import WorkspaceStore
+    workspaces = WorkspaceStore(tmp_path / 'tenant-metadata')
+    workspaces.migrate_shared(list(users.values()))
+    monkeypatch.setattr(service, 'WORKSPACES', workspaces)
+    monkeypatch.setattr(api, 'workspaces', workspaces)
     server = transport = thread = None
     if request.param == 'legacy':
         server = service.create_server('127.0.0.1', 0); thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
@@ -202,6 +207,7 @@ def http_client(request, service, monkeypatch):
         from fastapi.testclient import TestClient
         transport = TestClient(api.app)
     def call(path, payload=None, actor='teacher', method='POST'):
+        path = '/w/shared' + path
         headers = {'Content-Type': 'application/json', 'Cookie': actor}
         content = json.dumps(payload).encode() if payload is not None else None
         if transport:

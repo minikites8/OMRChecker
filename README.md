@@ -368,3 +368,9 @@ _Find OMRChecker on_ [**_Product Hunt_**](https://www.producthunt.com/posts/omr-
 
  <!-- [***Hacker News***](https://news.ycombinator.com/item?id=20420602) **|** -->
  <!-- **|** [***Swyya***](https://www.swyya.com/projects/omrchecker) -->
+
+## 多工作区 SaaS 阅卷
+
+登录后访问 `/workspaces`，创建独立阅卷工作区，或通过邀请码/邀请链接加入团队。各工作区独立管理试卷、答题卡、批改记录和成绩；所有者可生成、轮换及撤销邀请。现有账号与原有阅卷数据可继续使用。
+
+使用、部署、数据迁移及接口说明见 [多工作区 SaaS 阅卷](docs/saas-workspaces.md)。

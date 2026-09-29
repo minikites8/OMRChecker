@@ -22,3 +22,7 @@ OMRChecker.wiki/
 /data/
 **/platform-settings.json
 **/platform-settings.json.lock
+
+# Tenant files and local workspace membership database
+/workspaces/
+/workspaces.sqlite3*

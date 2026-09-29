@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer"><meta name="theme-color" content="#1c2e50">
+  <title>我的工作区 · 阅卷台</title>
+  <link rel="stylesheet" href="/static/workspaces.css?v=1">
+  <script src="/static/api.js?v=workspaces-1" defer></script>
+  <script src="/static/workspaces.js?v=1" defer></script>
+</head>
+<body class="workspace-hub" id="workspaceHub">
+  <a class="hub-skip" href="#hubMain">跳到工作区列表</a>
+  <header class="hub-header"><a class="hub-brand" href="/workspaces"><span class="hub-logo" aria-hidden="true">阅</span><strong>阅卷台<span>协作阅卷平台</span></strong></a><div class="hub-account"><span id="hubAccount">正在读取账号…</span><a href="/logout">退出登录</a></div></header>
+  <main id="hubMain" class="hub-main">
+    <div class="hub-heading"><div><p class="hub-kicker">教学协作，从这里开始</p><h1>我的阅卷工作区</h1><p>按学校、年级或考试组织阅卷，与团队共同完成每一份成绩。</p></div><span id="workspaceCount" class="hub-count">正在加载</span></div>
+    <p id="workspaceMessage" class="hub-message" role="status" aria-live="polite"></p>
+    <div class="hub-layout">
+      <section class="hub-workspaces" aria-labelledby="workspaceListHeading"><div class="hub-section-head"><h2 id="workspaceListHeading">已加入的工作区</h2><button id="refreshWorkspaces" class="hub-text-button" type="button">刷新列表</button></div><div id="workspaceList" class="hub-list" aria-busy="true"><p class="hub-empty">正在加载工作区…</p></div></section>
+      <aside class="hub-actions">
+        <section class="hub-panel"><div class="hub-panel-icon" aria-hidden="true">＋</div><h2>创建新工作区</h2><p>为一次考试或一个教学团队建立独立空间。</p><form id="createWorkspaceForm"><label for="workspaceName">工作区名称</label><input id="workspaceName" name="name" maxlength="80" placeholder="例如：高三年级 · 第一次月考" required autocomplete="off"><button class="hub-button hub-primary" type="submit">创建工作区</button></form></section>
+        <section class="hub-panel" id="joinPanel"><div class="hub-panel-icon hub-green" aria-hidden="true">↗</div><h2>加入团队工作区</h2><p>输入同事分享的邀请码，或粘贴完整邀请链接。</p><form id="joinWorkspaceForm"><label for="workspaceInvite">邀请码 / 邀请链接</label><input id="workspaceInvite" name="invite" maxlength="2048" placeholder="XXXX-XXXX-XXXX" required autocomplete="off" spellcheck="false"><button class="hub-button hub-secondary" type="submit">加入工作区</button></form></section>
+      </aside>
+    </div>
+    <section id="workspaceManagement" class="hub-management" hidden aria-labelledby="manageTitle"><div class="hub-section-head"><div><p class="hub-kicker">成员与协作邀请</p><h2 id="manageTitle">工作区设置</h2></div><button id="closeWorkspaceManagement" class="hub-text-button" type="button">收起</button></div><div class="hub-manage-grid"><div><h3>工作区成员</h3><ul id="workspaceMembers" class="hub-members"></ul></div><div id="invitationOwnerControls" hidden><h3>邀请同事加入</h3><p class="hub-muted">每次生成会更新邀请码和链接。默认有效期 7 天，最多加入 100 位成员。</p><div class="hub-inline-actions"><button id="createWorkspaceInvitation" class="hub-button hub-primary" type="button">生成新邀请</button><button id="revokeWorkspaceInvitation" class="hub-button hub-secondary" type="button">撤销当前邀请</button></div><div id="workspaceInvitationResult" class="hub-invitation" hidden><label for="workspaceInvitationCode">邀请码</label><div class="hub-copy-row"><input id="workspaceInvitationCode" readonly><button type="button" class="hub-button hub-secondary" data-copy="workspaceInvitationCode">复制</button></div><label for="workspaceInvitationUrl">邀请链接</label><div class="hub-copy-row"><input id="workspaceInvitationUrl" readonly><button type="button" class="hub-button hub-secondary" data-copy="workspaceInvitationUrl">复制</button></div><p id="workspaceInvitationExpiry" class="hub-muted"></p></div></div><p id="invitationMemberNotice" class="hub-muted" hidden>工作区所有者负责生成和撤销邀请。</p></div></section>
+  </main><footer class="hub-footer">试卷、答题卡、批改记录与成绩按工作区独立管理。</footer>
+</body></html>
