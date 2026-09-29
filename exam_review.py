@@ -827,13 +827,10 @@ def _read_student_id(image, ink_image):
     for center_x in x_centers:
         scores = [_dark_ratio(ink_image, center_x, center_y, 5) for center_y in y_centers]
         ordered = sorted(range(10), key=lambda index: scores[index], reverse=True)
-        # Use the strongest scanned mark; the column background identifies empty positions.
-        # Preserve every readable digit when another position is empty.
-        if scores[ordered[0]] - float(np.median(scores)) < 0.10:
-            digits.append("?")
-        else:
-            digits.append(str(ordered[0]))
-    return "".join(digits) if any(digit.isdigit() for digit in digits) else ""
+        if scores[ordered[0]] < 0.25 or scores[ordered[0]] - scores[ordered[1]] < 0.10:
+            return ""
+        digits.append(str(ordered[0]))
+    return "".join(digits)
 
 
 def _bubble_scores(image, x, y, choices, scale_x, scale_y, spacing, radius=6):
