@@ -131,7 +131,7 @@ class CandidateManager:
         if len(name)>40 or (name and not all(c.isalpha() or c in " ·•.'-" for c in name)):
             raise ValueError('姓名请填写 40 字以内的中文或字母')
         sid=str(payload.get('student_id') or '').strip()
-        if sid and not re.fullmatch(r'[0-9]{12}',sid):raise ValueError('学号需填写 12 位数字')
+        if sid and not re.fullmatch(r'[0-9?]{6,12}',sid):raise ValueError('学号支持 6—12 位数字，空位用 ? 表示')
         paper=str(payload.get('paper_type') or '').strip().upper()
         if paper not in ('','A','B','C'):raise ValueError('试卷类型请选择 A、B 或 C')
         with self.review_lock:

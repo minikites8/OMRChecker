@@ -26,7 +26,7 @@
   }
   function validateIdentity(name,sid,paper) {
     if (String(name).trim().length>40) return '姓名最多填写 40 字';
-    if(sid&&!/^[0-9]{12}$/.test(sid)) return '学号需填写 12 位数字';
+    if(sid&&!/^[0-9?]{6,12}$/.test(sid)) return '学号支持 6—12 位数字，空位用 ? 表示';
     if(!['','A','B','C'].includes(paper)) return '请选择正确的试卷类型';
     return '';
   }
@@ -67,7 +67,7 @@
       $('candidateOcrText').textContent='';$('candidateSaveStatus').textContent='';return;
     }
     $('candidateDetailHeading').textContent=record.student_name||'姓名待确认';
-    $('candidateDetailSub').textContent=record.student_id||'学号待确认';
+    $('candidateDetailSub').textContent=record.student_id||'学号未识别';
     if(state.dirty&&!force)return;
     $('candidateName').value=record.student_name||'';$('candidateStudentId').value=record.student_id||'';$('candidatePaperType').value=record.paper_type||'';
     const image=$('candidateNameImage');image.hidden=!record.name_image_url;
@@ -117,7 +117,7 @@
       const selectCell=node('td','candidate-select-cell'),checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.checked=state.selectedIds.has(record.review_id);checkbox.disabled=!hasExportableScore(record);checkbox.title=checkbox.disabled?'成绩生成后可选择导出':'导出当前成绩及确认状态';checkbox.setAttribute('aria-label','选择 '+(record.student_name||record.student_id||record.review_id));checkbox.addEventListener('change',()=>{if(checkbox.checked)state.selectedIds.add(record.review_id);else state.selectedIds.delete(record.review_id);draw();});selectCell.append(checkbox);
       const identity=node('td'),name=node('button','candidate-name',record.student_name||'姓名待识别');name.type='button';name.setAttribute('aria-label','查看考生 '+(record.student_name||'姓名待识别')+' '+(record.student_id||record.review_id));name.addEventListener('click',()=>selectRecord(record));
       if(record.review_id===state.selected)name.setAttribute('aria-current','true');
-      identity.append(name,node('small','table-subtitle',record.student_id||'学号待确认'),node('small','table-id',record.review_id));
+      identity.append(name,node('small','table-subtitle',record.student_id||'学号未识别'),node('small','table-id',record.review_id));
       const score=node('td'),summary=record.score_summary||{};
       score.append(node('strong','numeric',Number(summary.possible_score)>0?number(summary.total_score)+' / '+number(summary.possible_score):'待出分'),node('small','table-subtitle',record.paper_type?record.paper_type+' 卷':'卷型待确认'));
       const status=node('td'),grade=gradeStatus(record);status.append(node('span','status-pill '+(record.student_name_status==='已确认'?'success':'warning'),record.student_name_status||'待识别'),node('span','status-pill '+grade.className,grade.label));

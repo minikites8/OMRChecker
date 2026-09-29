@@ -266,7 +266,7 @@
     const body = $('recentReviewRows'); body.replaceChildren();
     rows.slice(0, 5).forEach(record => {
       const row = element('tr'), titleCell = element('td');
-      titleCell.append(element('strong', 'table-title', record.student_name ? record.student_name + ' · ' + (record.student_id || '学号待确认') : record.student_id ? '学号 ' + record.student_id : record.label || '答题卡'));
+      titleCell.append(element('strong', 'table-title', record.student_name ? record.student_name + ' · ' + (record.student_id || '学号未识别') : record.student_id ? '学号 ' + record.student_id : record.label || '答题卡'));
       titleCell.append(element('small', 'table-subtitle', record.review_id || '等待识别'));
       const score = record.score_summary || {};
       const scoreCell = element('td', 'numeric', record.review_id ? number(score.total_score) + ' / ' + number(score.possible_score) : '—');
