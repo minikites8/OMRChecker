@@ -864,6 +864,66 @@ def read_review_source_files(review_id):
 OBJECTIVE_VIEW_LOCK = threading.Lock()
 
 
+def create_scan_preview(payload):
+    """Generate one upload-group preview in workspace jobs, without creating a review."""
+    import tempfile
+    from review_overlay_pdf import build_upload_preview_pdf
+    files = payload.get("card_files")
+    if not isinstance(files, list) or not 1 <= len(files) <= 2 or any(not isinstance(f, dict) for f in files):
+        raise ValueError("每次预览请选择一份 PDF 或一至两张照片")
+    if any(Path(str(f.get("name") or "")).suffix.lower() == ".pdf" for f in files) and len(files) != 1:
+        raise ValueError("每份 PDF 请单独预览，照片按两张一份预览")
+    template = TEMPLATE_MANAGER.get(payload.get("template_id"))
+    preview_id = "scan-preview-" + uuid.uuid4().hex
+    JOBS_ROOT.mkdir(parents=True, exist_ok=True)
+    output = JOBS_ROOT / preview_id / "scan-overlay.pdf"
+    with tempfile.TemporaryDirectory(prefix=".scan-preview-", dir=str(JOBS_ROOT)) as temporary:
+        sources = save_uploads(files, Path(temporary))
+        result = build_upload_preview_pdf(sources, template.get("recognition") or {}, output)
+    PLATFORM_PERSISTENCE.sync_tree(output.parent, "scan_job", str(payload.get("_actor_user_id") or ""),
+                                   relative_prefix=output.parent.resolve().relative_to(JOBS_ROOT.resolve()))
+    return {"ok": True, "preview_id": preview_id,
+            "pdf_url": "/jobs/{}/scan-overlay.pdf".format(preview_id), **result}
+
+
+def read_review_overlay_pdf(review_id):
+    """Create a workspace-scoped PDF combining both scan overlay layers."""
+    from review_overlay_pdf import build_overlay_pdf, overlay_fingerprint
+    with OBJECTIVE_VIEW_LOCK:
+        clean_id, report_path, review = _load_review(review_id)
+        input_dir = report_path.parent.parent / "input"
+        names = review.get("card_files")
+        if not isinstance(names, list) or not names:
+            names = sorted(p.name for p in input_dir.iterdir()) if input_dir.is_dir() else []
+        files, seen = [], set()
+        for name in names:
+            if (not isinstance(name, str) or name in seen or "/" in name or "\\" in name
+                    or Path(name).suffix.lower() not in ALLOWED_EXTENSIONS):
+                continue
+            seen.add(name)
+            source = resolve_under(input_dir, name)
+            if not source.is_file():
+                raise ValueError("答卷扫描文件缺失：" + name)
+            files.append(source)
+        if not files:
+            return {"ok": True, "review_id": clean_id, "files": []}
+        reference_pdf = None
+        if review.get("template_id"):
+            template = TEMPLATE_MANAGER.get(review["template_id"])
+            reference_pdf = (template.get("recognition") or {}).get("reference_pdf")
+        key = overlay_fingerprint(files, review, reference_pdf)
+        destination = report_path.parent / "scan_overlay" / ("scan-overlay-" + key + ".pdf")
+        if not destination.is_file():
+            build_overlay_pdf(files, review, destination, reference_pdf)
+            PLATFORM_PERSISTENCE.sync_tree(
+                destination.parent, "review", str(review.get("owner_user_id") or ""),
+                relative_prefix=destination.parent.resolve().relative_to(REVIEW_ROOT.resolve()))
+        return {"ok": True, "review_id": clean_id,
+                "files": [{"name": "答卷扫描叠加.pdf", "size": destination.stat().st_size,
+                           "url": "/reviews/{}/output/scan_overlay/{}".format(
+                               quote(clean_id, safe=""), destination.name)}]}
+
+
 def read_objective_view(review_id):
     """Return cached scan geometry, building old reviews once without OCR or AI."""
     from objective_view import build_objective_view, VIEW_VERSION
@@ -1525,6 +1585,9 @@ class ScanUIHandler(BaseHTTPRequestHandler):
             elif route == "/api/review/source-files":
                 query = parse_qs(parsed.query)
                 self.send_json(200, read_review_source_files((query.get("review_id") or [""])[0]))
+            elif route == "/api/review/overlay-pdf":
+                query = parse_qs(parsed.query)
+                self.send_json(200, read_review_overlay_pdf((query.get("review_id") or [""])[0]))
             elif route == "/api/review/objective-view":
                 query = parse_qs(parsed.query)
                 self.send_json(200, read_objective_view((query.get("review_id") or [""])[0]))
@@ -1558,7 +1621,7 @@ class ScanUIHandler(BaseHTTPRequestHandler):
         if route.startswith("/api/admin/"):
             self._admin_request("POST")
             return
-        if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/sheets/preview", "/api/exam/import", "/api/exam/delete", "/api/exam/regrade", "/api/review", "/api/review/batch", "/api/review/ai-judge", "/api/review/ai-judge-question", "/api/review/confirm", "/api/review/confirm-grade", "/api/review/delete", "/api/candidates/delete", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
+        if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/sheets/preview", "/api/exam/import", "/api/exam/delete", "/api/exam/regrade", "/api/review", "/api/review/batch", "/api/review/scan-preview", "/api/review/ai-judge", "/api/review/ai-judge-question", "/api/review/confirm", "/api/review/confirm-grade", "/api/review/delete", "/api/candidates/delete", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
             self.send_json(404, {"ok": False, "error": "接口不存在"})
             return
         if route != "/api/auth/login" and not self._authorize(route):
@@ -1610,6 +1673,8 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                     "reference_url": sheet_url(package["reference_path"]),
                     "package_url": sheet_url(package["package_path"]),
                 }
+            elif route == "/api/review/scan-preview":
+                result = create_scan_preview(payload)
             elif route == "/api/review":
                 result = start_review_job(payload)
             elif route == "/api/review/batch":

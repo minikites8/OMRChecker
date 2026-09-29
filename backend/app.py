@@ -322,6 +322,12 @@ def review_source_files(request: Request, review_id: str = "") -> JSONResponse:
     return _review_response(request, lambda: legacy.read_review_source_files(review_id))
 
 
+@app.get("/api/review/overlay-pdf")
+def review_overlay_pdf(request: Request, review_id: str = "") -> JSONResponse:
+    current_user(request)
+    return _review_response(request, lambda: legacy.read_review_overlay_pdf(review_id))
+
+
 @app.get("/api/review/objective-view")
 def objective_view(request: Request, review_id: str = "") -> JSONResponse:
     current_user(request)
@@ -429,6 +435,12 @@ def review(request: Request, payload: dict) -> JSONResponse:
         response.status_code = 202
         response.headers["Cache-Control"] = "no-store"
     return response
+
+
+@app.post("/api/review/scan-preview")
+def scan_preview(request: Request, payload: dict) -> JSONResponse:
+    user = current_user(request)
+    return _review_response(request, lambda: legacy.create_scan_preview(actor_payload(payload, user)))
 
 
 @app.post("/api/review/batch")

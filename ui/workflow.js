@@ -117,6 +117,10 @@
     const merged = mergeFiles(files, event.dataTransfer?.files);
     commitFiles(merged.files, feedbackFor(merged));
   });
+  window.addEventListener('workflow:remove-files', event => {
+    const removed = new Set(event.detail?.files || []);
+    commitFiles(files.filter(file => !removed.has(file)), '已移除本份答卷，请重新扫描后添加');
+  });
   $('reviewClearFiles').addEventListener('click', () => { commitFiles([], '已清空待上传文件'); input.focus(); });
   $('workflowImportPaper').addEventListener('click', () => { window.platform.navigate('papers'); $('openImport').click(); });
   function settingsSummary() {

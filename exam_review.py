@@ -975,19 +975,8 @@ def regenerate_display_crops(card_paths, image_dir, crop_adjustments):
     return _save_display_crops(images, labels, image_dir)
 
 
-def extract_answer_card(card_paths, image_dir=None, template_config=None):
-    template_config = dict(template_config or {})
-    settings = recognition_settings(template_config.get("local_ocr_enabled"))
-    local_ocr = settings["local_ocr_enabled"]
-    material_mode = str(template_config.get("material_mode") or "grouped_61_63")
-    answer_card_layout = str(template_config.get("layout") or "16th_abc_61_63_fill_64_algorithm")
-    pages = []
-    for path in card_paths:
-        pages.extend(_load_page(Path(path)))
-    if not pages:
-        raise ValueError("答题卡图片无法读取")
-    reference_pdf = template_config.get("reference_pdf")
-    page_images = [image for _name, image in pages]
+def prepare_card_alignment(page_images, reference_pdf=None):
+    """Share page and local-region corrections between recognition and PDF previews."""
     normalized, alignment_scores = (
         _align_and_order_pages(page_images, reference_pdf=reference_pdf)
         if reference_pdf else _align_and_order_pages(page_images)
@@ -1008,6 +997,24 @@ def extract_answer_card(card_paths, image_dir=None, template_config=None):
                 initial_y = float((matrix[:, :2] @ center + matrix[:, 2] - center)[1] / sy)
             region_images[region], region_alignment[region] = align_printed_region(
                 normalized[page_index], references[page_index], region, initial_shift_y=initial_y)
+    return normalized, alignment_scores, references, region_images, region_alignment, program_shift, program_match_score
+
+
+def extract_answer_card(card_paths, image_dir=None, template_config=None):
+    template_config = dict(template_config or {})
+    settings = recognition_settings(template_config.get("local_ocr_enabled"))
+    local_ocr = settings["local_ocr_enabled"]
+    material_mode = str(template_config.get("material_mode") or "grouped_61_63")
+    answer_card_layout = str(template_config.get("layout") or "16th_abc_61_63_fill_64_algorithm")
+    pages = []
+    for path in card_paths:
+        pages.extend(_load_page(Path(path)))
+    if not pages:
+        raise ValueError("答题卡图片无法读取")
+    reference_pdf = template_config.get("reference_pdf")
+    page_images = [image for _name, image in pages]
+    (normalized, alignment_scores, references, region_images, region_alignment,
+     program_shift, program_match_score) = prepare_card_alignment(page_images, reference_pdf)
     objective = {}
     objective_flags = {}
     if normalized:
