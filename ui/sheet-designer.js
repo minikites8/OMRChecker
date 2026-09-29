@@ -237,5 +237,5 @@
       previewError(error);el.preview.replaceChildren();const retry=document.createElement('button');retry.type='button';retry.className='button button-secondary';retry.textContent='重试加载版式';retry.addEventListener('click',load,{once:true});el.preview.append(retry);
     }
   }
-  load();
+  window.omrWorkspaceReady.then(ready => { if (ready) load(); });
 })(typeof globalThis!=='undefined'?globalThis:this);

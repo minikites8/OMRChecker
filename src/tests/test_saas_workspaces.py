@@ -209,6 +209,25 @@ def test_http_create_invite_join_and_member_permissions(http_service):
     assert client.get(f'/w/{wid}/', headers={'Cookie': 'bob'}).status_code == 200
 
 
+@pytest.mark.parametrize('prefix', ['', '/w/shared', '/w/' + 'f' * 32])
+def test_http_admin_api_remains_available_without_workspace(http_service, monkeypatch, prefix):
+    client, store, root = http_service
+    database = SimpleNamespace(configured=False)
+    monkeypatch.setattr(api, 'database', database)
+    monkeypatch.setattr(scan_ui, 'PLATFORM_DATABASE', database)
+    path = prefix + '/api/admin/overview'
+    response = client.get(path, headers={'Cookie': 'charlie'})
+    assert response.status_code == 200, (path, response.text)
+    assert response.json()['ok'] is True
+    assert response.json()['user_management_enabled'] is False
+    assert current_workspace() is None
+    for cookie, status in [('alice', 403), ('', 401)]:
+        assert client.get(path, headers={'Cookie': cookie}).status_code == status
+    for method, route in [('POST', '/api/admin/users'), ('PATCH', '/api/admin/users/charlie')]:
+        for cookie, status in [('alice', 403), ('', 401)]:
+            assert client.request(method, prefix + route, headers={'Cookie': cookie}, json={}).status_code == status
+
+
 def test_http_data_assets_and_lists_are_isolated(http_service):
     client, store, root = http_service
     first, second = store.create(ALICE, '甲学校'), store.create(BOB, '乙学校')

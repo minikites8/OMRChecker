@@ -7,6 +7,10 @@ from platform_workspaces import WorkspaceError
 from workspace_context import split_workspace_path, tenant_route, workspace_scope, scoped_payload
 
 
+def is_admin_api(path):
+    return path == "/api/admin" or path.startswith("/api/admin/")
+
+
 def workspace_request(method):
     @wraps(method)
     def wrapped(handler, *args, **kwargs):
@@ -45,6 +49,9 @@ def workspace_request(method):
                     return
                 if not wid:
                     raise WorkspaceError(409, '请先选择阅卷工作区')
+                if is_admin_api(route):
+                    handler.path = route + ('?' + parsed.query if parsed.query else '')
+                    return method(handler, *args, **kwargs)
                 if route != '/' and not tenant_route(route):
                     raise WorkspaceError(404, '工作区接口不存在')
                 workspace = server.WORKSPACES.require_member(wid, user)
@@ -92,9 +99,13 @@ def install_fastapi_workspaces(app, server, get_user, get_store, auth_enabled=No
                 result = await run_in_threadpool(get_store().dispatch, request.method, path, user, payload)
                 return JSONResponse(result, headers={'Cache-Control': 'no-store'})
             if wid:
+                user = await run_in_threadpool(get_user, request)
+                if is_admin_api(route):
+                    request.scope['path'] = route
+                    request.scope['raw_path'] = route.encode('utf-8')
+                    return await call_next(request)
                 if route != '/' and not tenant_route(route):
                     raise WorkspaceError(404, '工作区接口不存在')
-                user = await run_in_threadpool(get_user, request)
                 workspace = await run_in_threadpool(get_store().require_member, wid, user)
                 if route == '/':
                     return FileResponse(server.UI_ROOT / 'index.html', headers={'Cache-Control': 'no-store'})

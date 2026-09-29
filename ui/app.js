@@ -350,7 +350,7 @@ document.querySelector('#workspaceRefreshReview').addEventListener('click', () =
 setInterval(() => refreshWorkspaceReview(), 5000);
 
 
-loadReviewImports().then(restoreActiveReview).finally(function(){window.dispatchEvent(new CustomEvent('platform:ready'))});
+window.omrWorkspaceReady.then(ready => ready ? loadReviewImports().then(restoreActiveReview) : undefined).finally(function(){window.dispatchEvent(new CustomEvent('platform:ready'))});
 
 window.addEventListener('platform:identity',function(event){
  const value=event.detail;if(reviewState.reviewId!==value.review_id)return;

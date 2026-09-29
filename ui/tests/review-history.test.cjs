@@ -56,3 +56,20 @@ test('refresh lists every historical record and avoids duplicate options',async(
   const records=Array.from({length:15},(_,i)=>({review_id:'saved-'+String(15-i).padStart(2,'0')})); const f=fixture(records);
   await f.dispatch('platform:ready'); await f.dispatch('hashchange'); assert.equal(f.options().length,15); assert.equal(new Set(f.options()).size,15); assert.equal(f.get('recentReviewRows').children.length,5);
 });
+
+test('admin readiness suppresses tenant history requests after ready and navigation', async () => {
+  const f=fixture(history);
+  f.context.window.omrWorkspaceReady=Promise.resolve(false);
+  await f.dispatch('platform:ready');
+  await f.dispatch('hashchange');
+  assert.equal(f.requests.length,0);
+});
+test('history waits for session resolution and resumes for workspace or local mode', async () => {
+  const f=fixture(history); let resolve;
+  f.context.window.omrWorkspaceReady=new Promise(done=>{resolve=done;});
+  await f.dispatch('platform:ready');
+  assert.equal(f.requests.length,0);
+  resolve(true);await new Promise(done=>setImmediate(done));
+  assert.equal(f.requests.length,1);
+  assert.deepEqual(f.options(),['20260928-new','20260927-old']);
+});

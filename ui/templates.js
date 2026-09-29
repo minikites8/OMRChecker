@@ -25,5 +25,5 @@
   elements.reset.addEventListener('click',resetEditor);
   elements.remove.addEventListener('click',async function(){const item=templateById(elements.editingId.value);if(!item)return;if(!window.confirm('删除模板“'+item.name+'”？'))return;try{elements.remove.disabled=true;setStatus('正在删除模板…');const result=await request('/api/templates/delete',{template_id:item.id});applyResult(result,result.active_template_id);resetEditor();setStatus('模板已删除。')}catch(error){setStatus(error.message,true)}finally{elements.remove.disabled=false}});
   [elements.reviewSelect,elements.scanSelect].forEach(function(select){if(select)select.addEventListener('change',function(){(globalThis.omrWorkspaceStorage || localStorage).setItem('omrTemplateId',select.value);const peer=select===elements.reviewSelect?elements.scanSelect:elements.reviewSelect;if(peer&&templateById(select.value))peer.value=select.value})});
-  loadTemplates();
+  window.omrWorkspaceReady.then(ready => { if (ready) loadTemplates(); });
 })();

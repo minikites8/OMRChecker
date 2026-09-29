@@ -205,6 +205,7 @@
     return pending > 0 ? ['待复核', 'warning'] : ['已出分', 'success'];
   }
   async function loadReviewHistory() {
+    if (window.omrWorkspaceReady && !await window.omrWorkspaceReady) return;
     if (model.historyLoading) return;
     model.historyLoading = true;
     const recordsAtRequest = new Map(model.records);

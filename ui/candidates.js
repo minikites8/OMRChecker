@@ -129,6 +129,7 @@
     drawDetails();
   }
   async function refresh(showLoading=true){
+    if (window.omrWorkspaceReady && !await window.omrWorkspaceReady) return;
     const sequence=++state.sequence;
     if(showLoading){state.loading=true;message('正在加载考生记录…');$('candidateRefresh').disabled=true;draw();}
     try{
