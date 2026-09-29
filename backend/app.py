@@ -316,6 +316,12 @@ def exam_imports(request: Request) -> dict:
     return {"ok": True, "imports": legacy.list_exam_imports()}
 
 
+@app.get("/api/review/source-files")
+def review_source_files(request: Request, review_id: str = "") -> JSONResponse:
+    current_user(request)
+    return _review_response(request, lambda: legacy.read_review_source_files(review_id))
+
+
 @app.get("/api/review/objective-view")
 def objective_view(request: Request, review_id: str = "") -> JSONResponse:
     current_user(request)

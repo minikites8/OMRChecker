@@ -846,6 +846,29 @@ def read_review_status(review_id):
     return review
 
 
+def read_review_source_files(review_id):
+    """List retained original PDF uploads for the current workspace's review."""
+    clean_id, report_path, review = _load_review(review_id)
+    input_dir = report_path.parent.parent / "input"
+    names = review.get("card_files")
+    if not isinstance(names, list) or not names:
+        names = sorted(p.name for p in input_dir.iterdir()) if input_dir.is_dir() else []
+    files, seen = [], set()
+    for name in names:
+        if (not isinstance(name, str) or name in seen or "/" in name or "\\" in name
+                or Path(name).suffix.lower() != ".pdf"):
+            continue
+        seen.add(name)
+        try:
+            path = resolve_under(input_dir, name)
+        except ValueError:
+            continue
+        if path.is_file():
+            files.append({"name": name, "size": path.stat().st_size,
+                          "url": "/reviews/{}/input/{}".format(quote(clean_id, safe=""), quote(name, safe=""))})
+    return {"ok": True, "review_id": clean_id, "files": files}
+
+
 OBJECTIVE_VIEW_LOCK = threading.Lock()
 
 
@@ -1474,6 +1497,9 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                 self.send_json_download(200, export_confirmed_grades(selected_ids), "考生成绩.json")
             elif route == "/api/exam/imports":
                 self.send_json(200, {"ok": True, "imports": list_exam_imports()})
+            elif route == "/api/review/source-files":
+                query = parse_qs(parsed.query)
+                self.send_json(200, read_review_source_files((query.get("review_id") or [""])[0]))
             elif route == "/api/review/objective-view":
                 query = parse_qs(parsed.query)
                 self.send_json(200, read_objective_view((query.get("review_id") or [""])[0]))

@@ -85,7 +85,8 @@ def install_fastapi_workspaces(app, server, get_user, get_store, auth_enabled=No
 
     @app.middleware('http')
     async def workspace_boundary(request, call_next):
-        path = request.url.path
+        # ASGI path preserves decoded filenames containing # and ? characters.
+        path = request.scope["path"]
         wid, route = split_workspace_path(path)
         try:
             if path.startswith(('/w/', '/api/w/')) and not wid:
@@ -114,7 +115,7 @@ def install_fastapi_workspaces(app, server, get_user, get_store, auth_enabled=No
                 user = await run_in_threadpool(get_user, request)
                 if is_admin_api(route):
                     request.scope['path'] = route
-                    request.scope['raw_path'] = route.encode('utf-8')
+                    request.scope['raw_path'] = quote(route, safe='/').encode('ascii')
                     return await call_next(request)
                 if route != '/' and not tenant_route(route):
                     raise WorkspaceError(404, '工作区接口不存在')
@@ -122,7 +123,7 @@ def install_fastapi_workspaces(app, server, get_user, get_store, auth_enabled=No
                 if route == '/':
                     return FileResponse(server.UI_ROOT / 'index.html', headers={'Cache-Control': 'no-store'})
                 request.scope['path'] = route
-                request.scope['raw_path'] = route.encode('utf-8')
+                request.scope['raw_path'] = quote(route, safe='/').encode('ascii')
                 with workspace_scope(workspace, url_prefix='/api/w' if path.startswith('/api/w/') else '/w'):
                     response = await call_next(request)
                     if 'application/json' in response.headers.get('content-type', ''):
