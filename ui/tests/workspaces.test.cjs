@@ -27,9 +27,9 @@ function runtime(wid) {
 test('only tenant APIs and artifacts receive the explicit workspace prefix', async () => {
   const {window,requests} = runtime(id);
   for (const target of ['/api/review', '/api/exam/imports', '/reviews/r/output.png', '/imports/a.json', '/api/sheets/preview']) {
-    await window.fetch(target); assert.equal(requests.at(-1).input, '/w/'+id+target);
+    await window.fetch(target); assert.equal(requests.at(-1).input, '/api/w/'+id+target);
   }
-  for (const target of ['/api/session','/api/health','/api/auth/login','/api/admin/users','/api/workspaces','/api/workspaces/join','/w/'+id+'/reviews/r.png']) {
+  for (const target of ['/api/session','/api/health','/api/auth/login','/api/admin/users','/api/workspaces','/api/workspaces/join','/api/w/'+id+'/reviews/r.png']) {
     await window.fetch(target); assert.equal(requests.at(-1).input,target);
   }
   await window.fetch('https://elsewhere.test/api/review'); assert.equal(requests.at(-1).input,'https://elsewhere.test/api/review');
@@ -38,11 +38,11 @@ test('only tenant APIs and artifacts receive the explicit workspace prefix', asy
 test('absolute URLs, URL objects and Request instances preserve request data', async () => {
   const {window,requests} = runtime(id);
   await window.fetch(new URL('https://omr.test/api/exam/imports?x=1'));
-  assert.equal(requests.at(-1).input,'/w/'+id+'/api/exam/imports?x=1');
+  assert.equal(requests.at(-1).input,'/api/w/'+id+'/api/exam/imports?x=1');
   window.OMR_API_BASE='https://api.omr.test';
   await window.fetch(new Request('https://omr.test/api/review', {method:'POST',headers:{'X-Test':'yes'},body:'hello'}));
   const result=requests.at(-1).input;
-  assert.equal(result.url,'https://api.omr.test/w/'+id+'/api/review'); assert.equal(result.headers.get('X-Test'),'yes'); assert.equal(await result.text(),'hello');
+  assert.equal(result.url,'https://api.omr.test/api/w/'+id+'/api/review'); assert.equal(result.headers.get('X-Test'),'yes'); assert.equal(await result.text(),'hello');
 });
 
 test('review and template selections persist with workspace namespaces', () => {

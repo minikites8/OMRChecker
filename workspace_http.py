@@ -19,7 +19,7 @@ def workspace_request(method):
         parsed = urlsplit(original)
         wid, route = split_workspace_path(parsed.path)
         try:
-            if parsed.path.startswith('/w/') and not wid:
+            if parsed.path.startswith(('/w/', '/api/w/')) and not wid:
                 raise WorkspaceError(404, '工作区地址格式错误')
             if route in {'/workspaces', '/workspaces.html'} or route.startswith('/join/'):
                 handler.send_file(server.UI_ROOT / 'workspaces.html')
@@ -56,7 +56,7 @@ def workspace_request(method):
                     raise WorkspaceError(404, '工作区接口不存在')
                 workspace = server.WORKSPACES.require_member(wid, user)
                 handler.path = route + ('?' + parsed.query if parsed.query else '')
-                with workspace_scope(workspace):
+                with workspace_scope(workspace, url_prefix='/api/w' if parsed.path.startswith('/api/w/') else '/w'):
                     return method(handler, *args, **kwargs)
             return method(handler, *args, **kwargs)
         except WorkspaceError as error:
@@ -76,7 +76,7 @@ def install_fastapi_workspaces(app, server, get_user, get_store, auth_enabled=No
         path = request.url.path
         wid, route = split_workspace_path(path)
         try:
-            if path.startswith('/w/') and not wid:
+            if path.startswith(('/w/', '/api/w/')) and not wid:
                 raise WorkspaceError(404, '工作区地址格式错误')
             if path in {'/workspaces', '/workspaces.html'} or path.startswith('/join/'):
                 return FileResponse(server.UI_ROOT / 'workspaces.html', headers={'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer'})
@@ -111,7 +111,7 @@ def install_fastapi_workspaces(app, server, get_user, get_store, auth_enabled=No
                     return FileResponse(server.UI_ROOT / 'index.html', headers={'Cache-Control': 'no-store'})
                 request.scope['path'] = route
                 request.scope['raw_path'] = route.encode('utf-8')
-                with workspace_scope(workspace):
+                with workspace_scope(workspace, url_prefix='/api/w' if path.startswith('/api/w/') else '/w'):
                     response = await call_next(request)
                     if 'application/json' in response.headers.get('content-type', ''):
                         body = b''.join([part async for part in response.body_iterator])

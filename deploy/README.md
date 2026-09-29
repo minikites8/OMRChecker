@@ -62,3 +62,37 @@ docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 默认配置文件 `/data/platform-settings.json` 使用现有 `omr-data` 卷持久化；变更配置文件位置使用启动变量 `OMR_SETTINGS_FILE`，并把对应目录挂载到持久卷。该文件包含服务凭据，请为目录设置合适的访问权限与备份策略。
 
 AI 与默认 OCR 参数对后续任务即时生效。页面标记为重启生效的参数，在 `docker compose restart backend` 后应用。Dockerfile 通过 `python -m backend.main` 读取保存的监听配置；调整后端端口时同步更新 Nginx upstream 与容器网络配置。
+
+## 多工作区反向代理
+
+工作区页面使用 `/w/<workspace_id>/`。页面中的 API、扫描图、下载文件使用
+`/api/w/<workspace_id>/...`，统一经过已有的 `/api/` 代理。该通道与 `/w/`
+共用登录与工作区成员校验，保留租户隔离。
+
+例如原有工作区的三个数据地址为：
+
+- `/api/w/shared/api/exam/imports`
+- `/api/w/shared/reviews/latest.json`
+- `/api/w/shared/api/candidates`
+
+前后端需一起更新。`ui/api.js` 将已有 `/w/<id>/...` 数据链接转换到 API 通道；
+`workspace_http.py` 将两种路径交给同一业务接口。文件链接在各自请求的工作区上下文中生成。
+
+### OpenResty / Nginx 多层代理
+
+当接口返回 `200 text/html` 且正文是阅卷首页时，请检查入口代理的 SPA 首页回退。
+直接访问原 `/w/...` 数据地址时，入口代理也需要把 `/w/` 转发至应用服务。
+`deploy/nginx.conf` 使用 `location ^~ /w/` 与 `location ^~ /api/`，保证这些路径
+优先于通用静态文件正则；`proxy_pass` 保留完整的工作区路径。
+外层 OpenResty 可沿用现有 `/api/` 的上游目标配置 `/w/` 转发。
+
+源码部署时，在服务器仓库目录执行：
+
+```bash
+git pull --ff-only
+docker compose --env-file .env -f deploy/docker-compose.yml up -d --build backend frontend
+```
+
+更新外层代理配置后，先执行对应实例的 `nginx -t`，通过后再平滑重载。
+验收：登录后，考试列表和考生列表返回 JSON；已有最近复核记录时 `latest.json` 返回 JSON。
+新工作区的最近复核记录可返回 404。访客返回 401，工作区外成员返回 404。

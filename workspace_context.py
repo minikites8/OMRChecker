@@ -7,6 +7,7 @@ import os
 import re
 
 CURRENT_WORKSPACE = ContextVar('omr_workspace', default=None)
+WORKSPACE_URL_PREFIX = ContextVar('omr_workspace_url_prefix', default='/w')
 
 
 def current_workspace():
@@ -14,11 +15,13 @@ def current_workspace():
 
 
 @contextmanager
-def workspace_scope(workspace):
+def workspace_scope(workspace, *, url_prefix='/w'):
     token = CURRENT_WORKSPACE.set(workspace)
+    prefix_token = WORKSPACE_URL_PREFIX.set(url_prefix)
     try:
         yield
     finally:
+        WORKSPACE_URL_PREFIX.reset(prefix_token)
         CURRENT_WORKSPACE.reset(token)
 
 
@@ -102,14 +105,14 @@ def scoped_payload(value):
         return [scoped_payload(item) for item in value]
     if isinstance(value, str):
         # Stored JSON stays portable; links returned to the browser are explicit.
-        value = re.sub(r'^/w/(?:[a-f0-9]{32}|shared)(?=/(?:jobs|sheets|reviews|imports)/)', '', value)
+        value = re.sub(r'^/(?:api/)?w/(?:[a-f0-9]{32}|shared)(?=/(?:jobs|sheets|reviews|imports)/)', '', value)
         if re.match(r'^/(jobs|sheets|reviews|imports)/', value):
-            return '/w/' + workspace['id'] + value
+            return WORKSPACE_URL_PREFIX.get() + '/' + workspace['id'] + value
     return value
 
 
 def split_workspace_path(path):
-    match = re.match(r'^/w/([a-f0-9]{32}|shared)(/.*)?$', path)
+    match = re.match(r'^/(?:api/)?w/([a-f0-9]{32}|shared)(/.*)?$', path)
     return (match.group(1), match.group(2) or '/') if match else (None, path)
 
 
