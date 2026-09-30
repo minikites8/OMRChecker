@@ -17,17 +17,22 @@ AI_RESULT_FIELDS = (
 )
 
 
-def _prepare_review(review, imported, run_id):
-    selected = exam_review._import_variant_for_review(imported, review.get("answer_paper_type", ""))
+def _prepare_review(review, imported, run_id, paper_type=None):
     variants = imported.get("paper_variants") or {}
-    if variants and review.get("answer_paper_type") not in variants:
-        raise ValueError("请先确认答卷对应的卷型")
+    # Whole-sheet regrading explicitly supplies the user-selected paper type.
+    selected_type = str(paper_type if paper_type is not None else review.get("answer_paper_type") or "").strip().upper()
+    if variants and selected_type not in variants:
+        raise ValueError("请先选择该试卷已导入的卷型")
+    selected = variants[selected_type] if variants else imported
     exam = selected.get("exam", {})
     sources, answers = exam_review._structured_alias_maps(
         exam, selected.get("source_map", {}), selected.get("answer_map", {}))
     scores = exam_review._structured_score_map(exam)
     metadata = exam_review._structured_question_metadata(exam)
     refreshed = copy.deepcopy(review)
+    refreshed["answer_paper_type"] = selected_type if variants else ""
+    refreshed["available_paper_types"] = list(variants)
+    refreshed["answer_selection_status"] = "已按选择的{}卷答案批改".format(selected_type) if variants else "单套试卷答案"
     for item in refreshed.get("objective", []):
         question = str(item["question"])
         item["expected"] = exam_review._objective_expected(answers.get(question, ""))
@@ -110,6 +115,17 @@ def regrade_exam(payload):
                 ids.append(service.valid_review_id(path.parent.parent.name))
     if not ids:
         raise ValueError("该试卷暂无已保存答卷，请先使用开始批改录入答卷")
+    selected_type = None
+    if "paper_type" in payload:
+        if requested is None or len(ids) != 1:
+            raise ValueError("指定卷型时请选择一份答卷")
+        value = payload["paper_type"]
+        selected_type = value.strip().upper() if isinstance(value, str) else ""
+        if selected_type not in {"A", "B", "C"}:
+            raise ValueError("请选择 A、B 或 C 卷")
+        variants = imported.get("paper_variants") or {}
+        if variants and selected_type not in variants:
+            raise ValueError("所选卷型尚未导入题目与答案")
     run_id = datetime.now().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
     entries, busy, failures = [], [], []
     for review_id in ids:
@@ -121,7 +137,12 @@ def regrade_exam(payload):
                 if _busy(service, review):
                     busy.append(review_id)
                     continue
-                refreshed = _prepare_review(review, imported, run_id)
+                source_review = copy.deepcopy(review)
+                if selected_type is not None:
+                    source_review["paper_type"] = selected_type
+                    source_review["paper_type_status"] = "人工确认"
+                refreshed = _prepare_review(source_review, imported, run_id,
+                                            paper_type=source_review.get("paper_type") or source_review.get("answer_paper_type"))
                 history = path.parent / "regrade_history" / (run_id + ".json")
                 service._write_json_atomic(history, review)
                 service.PLATFORM_PERSISTENCE.sync_file(
@@ -130,7 +151,8 @@ def regrade_exam(payload):
                 service._set_review_unconfirmed(refreshed)
                 refreshed["regrade"] = {"id": run_id, "at": datetime.now(timezone.utc).isoformat(),
                                         "history": history.relative_to(path.parent).as_posix(),
-                                        "manual_decisions_preserved": True}
+                                        "manual_decisions_preserved": True,
+                                        "paper_type": refreshed.get("answer_paper_type") or refreshed.get("paper_type", "")}
                 record_action(refreshed, payload, "review.regraded")
                 service._write_review(path, refreshed)
                 refreshed = service.start_ai_review({"review_id": review_id})

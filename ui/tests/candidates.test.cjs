@@ -126,12 +126,12 @@ test('clicking a candidate row immediately switches the complete detail panel',a
   assert.equal(f.rows()[1].attributes['aria-current'],'true');assert.ok(f.rows()[1].className.includes('candidate-selected'));
   assert.equal(f.rows()[0].attributes['aria-current'],undefined);
 });
-test('candidate rows expose direct selection and keep only the delete action',async()=>{
+test('candidate rows expose direct selection, regrade and delete actions',async()=>{
   const f=candidateFixture(scoredRecords());await f.refresh();
   for(const row of f.rows()){
     assert.equal(row.tabIndex,0);assert.equal(row.attributes['aria-controls'],'candidateForm');
     assert.ok(row.attributes['aria-label'].startsWith('查看考生'));
-    assert.deepEqual(row.children[4].children.map(button=>button.textContent),['删除']);
+    assert.deepEqual(row.children[4].children.map(button=>button.textContent),['重新批改','删除']);
   }
   f.rows()[2].children[1].children[0].listeners.click();assert.equal(f.$('candidateName').value,'丙');
 });
@@ -141,7 +141,7 @@ test('row selection ignores checkboxes, actions, inputs and the selection column
   assert.equal(f.$('candidateName').value,original);
   for(const target of ['button','a','input','select','textarea','label','.candidate-select-cell'])assert.ok(selector.split(',').includes(target));
   await f.check(1,true);assert.equal(f.$('candidateName').value,original);assert.equal(f.$('candidateSelectionSummary').textContent,'已选择 1 人');
-  f.rows()[1].children[4].children[0].listeners.click();assert.deepEqual(f.deletions,['r2']);assert.equal(f.$('candidateName').value,original);
+  f.rows()[1].children[4].children.find(button=>button.textContent==='删除').listeners.click();assert.deepEqual(f.deletions,['r2']);assert.equal(f.$('candidateName').value,original);
 });
 test('clicking the selected candidate retains current edits',async()=>{
   const f=candidateFixture(scoredRecords());await f.refresh();clickCandidateRow(f.rows()[0]);

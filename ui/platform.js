@@ -295,6 +295,10 @@
       });
       actionCell.append(button);
       if (record.review_id) {
+        const regrade = element('button', 'text-link review-regrade-button', '重新批改'); regrade.type = 'button';
+        regrade.dataset.regradeReview = record.review_id;
+        regrade.setAttribute('aria-label', '重新批改这份答卷 ' + (record.student_name || record.student_id || record.review_id));
+        actionCell.append(regrade);
         const remove = element('button', 'text-link review-delete-button', '删除'); remove.type = 'button';
         remove.setAttribute('aria-label', '删除批改记录及考生信息 ' + record.review_id);
         remove.addEventListener('click', () => window.reviewDeletion.remove(record, remove)); actionCell.append(remove);
@@ -396,6 +400,12 @@
     $('activeReviewLabel').textContent = (result.student_name || '姓名待识别') + ' · 学号 ' + (result.student_id || '待识别') + ' · ' + (result.paper_type || '卷型待识别') + ' · ' + result.review_id;
     renderMetrics(calculateLocalScore()); renderRecords(); applyFilter();
     if (shouldNavigate) navigate('results');
+  });
+  window.addEventListener('platform:single-review-regraded', event => {
+    const record = event.detail.record;
+    if (!record?.review_id || window.reviewDeletion?.isDeleted(record.review_id)) return;
+    model.records.set(record.review_id, {...model.records.get(record.review_id), ...record});
+    renderRecords();
   });
   window.addEventListener('platform:identity', event => {
     const record = event.detail;

@@ -126,6 +126,7 @@
       score.append(node('strong','numeric',Number(summary.possible_score)>0?number(summary.total_score)+' / '+number(summary.possible_score):'待出分'),node('small','table-subtitle',record.paper_type?record.paper_type+' 卷':'卷型待确认'));
       const status=node('td'),grade=gradeStatus(record);status.append(node('span','status-pill '+(record.student_name_status==='已确认'?'success':'warning'),record.student_name_status||'待识别'),node('span','status-pill '+grade.className,grade.label));
       const actions=node('td');
+      const regrade=node('button','text-link review-regrade-button','重新批改');regrade.type='button';regrade.setAttribute('data-regrade-review',record.review_id);regrade.setAttribute('aria-label','重新批改这份答卷 '+(record.student_name||record.student_id||record.review_id));actions.append(regrade);
       const remove=node('button','text-link review-delete-button','删除');remove.type='button';remove.setAttribute('aria-label','删除答卷及考生信息 '+record.review_id);remove.addEventListener('click',()=>window.reviewDeletion.remove(record,remove));actions.append(remove);
       row.append(selectCell,identity,score,status,actions);body.append(row);
     });
