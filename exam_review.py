@@ -1538,6 +1538,11 @@ def _validate_visual_judgment(item):
 def _apply_ai_review_result(item, result):
     """把单个题目的 AI 响应写回题目，供整体和单题重识别共用。"""
     item["ai_score"] = None
+    if item.get("ai_visual_evidence"):
+        item["ai_visual_evidence"] = {
+            key: value for key, value in item["ai_visual_evidence"].items()
+            if key not in {"matched_reference_question", "matched_expected_answer"}
+        }
     result_map = result.get("results", {})
     ai_result = result_map.get(str(item.get("question", "")))
     if ai_result:
@@ -1594,6 +1599,82 @@ def _apply_ai_review_result(item, result):
         item["ai_corrected_answer"] = ""
 
 
+def _apply_ai_review_results(items, result):
+    """Match correction answers one-to-one within their original source question."""
+    from ai_judge import _group_key
+
+    groups = {}
+    for item in items:
+        _apply_ai_review_result(item, result)
+        if _is_correction_question(item.get("question")):
+            groups.setdefault(_group_key(item), []).append(item)
+    for group in groups.values():
+        if len(group) < 2:
+            continue
+        references = {}
+        for reference in group:
+            # Repeated equivalent reference text describes the same correction point.
+            key = _normalize(reference.get("expected_answer", ""))
+            references.setdefault(key, reference)
+        candidates = {}
+        pending = {}
+        for index, item in enumerate(group):
+            candidates[index] = {}
+            for key, reference in references.items():
+                candidate = {**item, "expected_answer": reference.get("expected_answer", "")}
+                _apply_ai_review_result(candidate, result)
+                if candidate.get("ai_status") in {"AI通过", "AI部分得分"} and (candidate.get("ai_score") or 0) > 0:
+                    candidates[index][key] = candidate
+                elif candidate.get("ai_status") == "AI需复核":
+                    pending.setdefault(index, candidate)
+        owners = {}
+
+        def assign(index, seen):
+            for key in candidates[index]:
+                if key in seen:
+                    continue
+                seen.add(key)
+                if key not in owners or assign(owners[key], seen):
+                    owners[key] = index
+                    return True
+            return False
+
+        # Retain one strongest slot for each actual written correction, including
+        # references whose lists of equivalent answers overlap.
+        written_answers = set()
+        for index in sorted(candidates, key=lambda i: -max(
+                (entry["ai_score"] for entry in candidates[i].values()), default=0)):
+            if not candidates[index]:
+                continue
+            candidate = next(iter(candidates[index].values()))
+            line, content = _split_correction_answer(candidate.get("ai_visual_text", ""))
+            answer_key = (line, _normalize(content))
+            if answer_key in written_answers:
+                continue
+            written_answers.add(answer_key)
+            assign(index, set())
+        matches = {index: key for key, index in owners.items()}
+        for index, item in enumerate(group):
+            if index in matches:
+                key = matches[index]
+                matched = candidates[index][key]
+                for field in ("ai_status", "ai_score", "ai_reason"):
+                    item[field] = matched[field]
+                reference = references[key]
+                item["ai_visual_evidence"] = {
+                    **(item.get("ai_visual_evidence") or {}),
+                    "matched_reference_question": str(reference["question"]),
+                    "matched_expected_answer": reference.get("expected_answer", ""),
+                }
+                item["ai_reason"] = "同题无序匹配参考{}：{}".format(reference["question"], item["ai_reason"])
+            elif candidates[index]:
+                item["ai_status"], item["ai_score"] = "AI不通过", 0
+                item["ai_reason"] = "同一大题内该改错点已计分，重复作答计0分"
+            elif index in pending:
+                for field in ("ai_status", "ai_score", "ai_reason"):
+                    item[field] = pending[index][field]
+
+
 def _finalize_ai_review(review):
     review["review_summary"] = _review_summary(review.get("items", []))
     review["score_summary"] = _score_summary(review)
@@ -1609,8 +1690,7 @@ def apply_ai_review(review, progress_callback=None):
         result = judge_handwritten_items(review.get("items", []))
     else:
         result = judge_handwritten_items(review.get("items", []), progress_callback=progress_callback)
-    for item in review.get("items", []):
-        _apply_ai_review_result(item, result)
+    _apply_ai_review_results(review.get("items", []), result)
     review["ai_judgment"] = {key: value for key, value in result.items() if key != "results"}
     return _finalize_ai_review(review)
 
@@ -1627,8 +1707,7 @@ def apply_ai_review_question(review, question, progress_callback=None):
         result = judge_handwritten_items(group)
     else:
         result = judge_handwritten_items(group, progress_callback=progress_callback)
-    for item in group:
-        _apply_ai_review_result(item, result)
+    _apply_ai_review_results(group, result)
     review["ai_question_judgment"] = {
         key: value for key, value in result.items() if key != "results"
     }

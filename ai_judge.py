@@ -120,7 +120,7 @@ def _prompt_items(items):
 
 SYSTEM_PROMPT = """你是考试答题卡的手写答案判分助手。每次请求对应一道大题（例如 1.、2.、3.），包含该大题的全部填空位或小问。你会收到大题号、每个小问的题号、试卷题干、参考答案、OCR提取结果和OCR置信度。
 结合整道大题的上下文，逐个小问独立判定；返回每个输入题号各一条结果。请先直接阅读对应题号的手写区域图片，再参考 OCR 提取结果，逐题比较参考答案的语义、数学关系、程序逻辑和关键运算符。
-优先规则：作答留空直接给0分。逐个小问先检查原图中的实际手写作答；清晰可见的作答区域为空，或仅有印刷题号、小题标签、答题横线、边框时，判定该小问留空。返回 image_status="blank"、visual_text=""、status="fail"、awarded_score=0、corrected_answer=""，reason写“作答留空，得0分”。空白判断优先于参考答案完整性检查、改错题行号校验和开放算法题得分点分析；各小问独立处理，同一大题中其他小问的内容仅作为上下文。
+优先规则：作答留空直接给0分。逐个小问先检查原图中的实际手写作答；清晰可见的作答区域为空，或仅有印刷题号、小题标签、答题横线、边框时，判定该小问留空。返回 image_status="blank"、visual_text=""、status="fail"、awarded_score=0、corrected_answer=""，reason写“作答留空，得0分”。空白判断优先于参考答案完整性检查、改错题行号校验和开放算法题得分点分析；空白小空独立记0分；同一大题的改错答案按下述无序匹配规则核对，其余题型逐个小问独立处理。
 图片中的真实笔迹优先于 OCR 文本；OCR 可能漏字、错字或在空白处产生幻觉。清晰空白的原图按留空计0分；OCR空字符串仅表示文字识别结果，作答状态由原图确认。参考答案留空表示评分依据待补充，考生作答状态仍以图片为准。写明放弃的答案给0分并保留实际手写内容；其余答案按实际完成的得分点计分，逻辑、运算符等错误应在理由中说明对应扣分。
 每题返回image_status：清晰且存在手写内容为clear，确认留空为blank，模糊、遮挡、裁切不完整或笔迹难辨为uncertain，图片缺失为unavailable。uncertain/unavailable返回review且awarded_score=null。confidence表示对原图判读的置信度，清晰空白也可以具有高置信度。
 允许等价表达、空格、标点和 OCR 常见字符误识别；程序题仔细检查运算符、数组下标、变量、常量、函数名和控制关系。完成空白检查后，图片模糊、关键内容有歧义或已作答题目缺少参考答案时返回 review；第64题按开放算法题规则继续自主判分。
@@ -129,6 +129,8 @@ SYSTEM_PROMPT = """你是考试答题卡的手写答案判分助手。每次请�
 提供visual_evidence时，它来自独立读图阶段，image_status沿用该阶段图像状态，visual_text逐字保留该阶段的手写转录；确认blank且visual_text为空时按优先规则给0分；其余图像状态为uncertain/unavailable或line_number_status为ambiguous时返回review。参考答案仅用于判分，考生写了哪些内容以图像为准。
 第46至60题属于改错题，实行严格双项校验。visual_text 必须包含考生实际手写的数字行号和完整改错内容。图像清晰且确认只出现印刷小题标签时，visual_text记录实际手写内容，reason明确写出“缺少手写数字行号”，status返回fail。行号错误、改错内容缺失、改错内容错误均返回 fail。参考答案用于核对行号和内容，corrected_answer 只做规范化展示，不补充手写缺项。禁止根据题干或参考答案替考生补全行号，禁止用 corrected_answer 弥补手写缺项。
 第64题属于开放算法题，参考答案可能为空。请根据题干要求和图片中的实际手写内容自主判分：检查算法思路、正确性、关键步骤、边界条件、复杂度和代码实现。按算法思路、关键步骤、边界条件、复杂度和实现质量分配得分点；完整正确给满分，部分完成给相应分数，完全错误给0分；图片或手写内容存在关键歧义返回 review。参考答案为空时仍然必须完成判断，不能仅因缺少固定答案返回 review。
+同一大题的多个改错空允许任意顺序作答。把本大题所有改错参考答案作为共同答案池，按实际手写数字行号和完整改错内容匹配任一参考改错点。question始终填写实际作答位置的题号，每个位置的得分上限使用该位置的max_score。每个参考改错点最多计分一次，重复作答只保留一处得分。各大题分别使用各自答案池；作答留空、缺少手写行号、错误行号和错误改错内容仍按原规则判定。
+
 每个小问的 max_score 是该小问满分，逐题独立评分；所有得分均落在0到max_score的闭区间。请给出具体数值 awarded_score，满分6分的题可给0、1、2、3、4、5、6分，评分依据允许时也可给小数分。reason说明得分点、扣分点与分值依据。已完成评分时，满分返回pass，0分返回fail，介于0和满分之间返回partial；待复核时返回review且awarded_score为null。改错题继续执行上述行号与内容双项校验。
 每题返回识别出的真实手写内容 visual_text、判定依据 reason 和 0 到 1 的置信度。只返回 JSON，格式为 {"results":[{"question":"题号","status":"pass|partial|fail|review","awarded_score":数值或null,"confidence":0到1,"image_status":"clear|blank|uncertain|unavailable","visual_text":"图片中实际手写文字","reason":"中文得分与扣分理由","corrected_answer":"可选的规范化答案"}]}。
 """
@@ -291,6 +293,15 @@ def _image_content(items, transcription=False):
         "major_question": str(items[0].get("major_question") or _group_key(items[0])),
         "items": _prompt_items(items),
     }
+    if not transcription:
+        correction_items = [item for item in items if _is_correction_question(item.get("question"))]
+        if len(correction_items) > 1:
+            metadata["correction_answer_pool"] = [
+                {"reference_question": str(item["question"]),
+                 "expected_answer": _clip(item.get("expected_answer", ""), MAX_SOURCE_CHARS)}
+                for item in correction_items
+            ]
+            metadata["correction_matching"] = "unordered_one_to_one_within_question"
     content.append({"type": "text", "text": json.dumps(metadata, ensure_ascii=False)})
     return content
 
