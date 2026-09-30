@@ -424,6 +424,24 @@ def exam_import(request: Request, payload: dict) -> dict:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
 
+@app.get("/api/exam/answers")
+def exam_answers(request: Request, import_id: str = "", paper_type: str = "") -> JSONResponse:
+    current_user(request)
+    return _review_response(request, lambda: legacy.read_exam_answers(import_id, paper_type))
+
+
+@app.post("/api/exam/answers")
+def exam_answers_save(request: Request, payload: dict) -> JSONResponse:
+    user = current_user(request)
+    return _review_response(request, lambda: legacy.save_exam_answers(actor_payload(payload, user)))
+
+
+@app.post("/api/exam/regrade-question")
+def exam_question_regrade(request: Request, payload: dict) -> JSONResponse:
+    user = current_user(request)
+    return _review_response(request, lambda: legacy.regrade_exam_question(actor_payload(payload, user)))
+
+
 @app.post("/api/exam/regrade")
 def exam_regrade(request: Request, payload: dict) -> JSONResponse:
     user = current_user(request)

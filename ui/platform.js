@@ -166,6 +166,10 @@
         if (reviewState.submitting) { toast('答卷正在提交，请稍后切换试卷。'); navigate('grading'); return; }
         if (!window.platform.confirmSwitch()) return; selectReviewImport(entry.import_id); navigate('grading');
       });
+      const viewAnswers = element('button', 'text-link', '题目与答案'); viewAnswers.type = 'button';
+      viewAnswers.dataset.action = 'view-exam-answers';
+      viewAnswers.setAttribute('aria-label', '查看和编辑题目与答案 ' + (entry.name || entry.import_id));
+      viewAnswers.addEventListener('click', () => window.examAnswers?.open(entry));
       const regrade = element('button', 'text-link', '重新批改'); regrade.type = 'button';
       regrade.dataset.action = 'regrade-exam';
       regrade.setAttribute('aria-label', '重新批改试卷 ' + (entry.name || entry.import_id));
@@ -180,7 +184,7 @@
         try { await deleteExamImport(entry.import_id, entry.name || entry.import_id); }
         finally { remove.disabled = false; }
       });
-      actionWrap.append(use, regrade, download, remove); actions.append(actionWrap); row.append(titleCell, count, total, answers, actions); body.append(row);
+      actionWrap.append(viewAnswers); actionWrap.append(use, regrade, download, remove); actions.append(actionWrap); row.append(titleCell, count, total, answers, actions); body.append(row);
     });
     if (!filtered.length) emptyRow(body, 5, model.imports.length ? '没有匹配的试卷，请调整搜索内容。' : '试卷库为空，点击“导入试卷”开始。');
   }
