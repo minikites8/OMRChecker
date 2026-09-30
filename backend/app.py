@@ -310,6 +310,22 @@ def candidate_export(request: Request) -> JSONResponse:
     return response
 
 
+@app.get("/api/exam/roster")
+def exam_roster(request: Request, import_id: str = "") -> JSONResponse:
+    current_user(request)
+    response = _review_response(request, lambda: legacy.read_exam_roster(import_id))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.post("/api/exam/roster")
+def exam_roster_import(request: Request, payload: dict) -> JSONResponse:
+    user = current_user(request)
+    response = _review_response(request, lambda: legacy.import_exam_roster(actor_payload(payload, user)))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.get("/api/exam/imports")
 def exam_imports(request: Request) -> dict:
     current_user(request)

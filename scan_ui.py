@@ -356,6 +356,36 @@ def list_exam_imports(limit=50):
     return imports
 
 
+def read_exam_roster(import_id):
+    from exam_roster import load_roster, attendance
+    with EXAM_IMPORT_LOCK:
+        roster = load_roster(IMPORT_ROOT, import_id)
+        records, skipped = CANDIDATE_MANAGER.records()
+    return attendance(roster, records, skipped)
+
+
+def import_exam_roster(payload):
+    from exam_roster import save_roster, MAX_ROSTER_BYTES
+    import_id = payload.get("import_id")
+    content = payload.get("content")
+    filename = "粘贴名单.tsv"
+    if content is None:
+        upload = payload.get("file")
+        if not isinstance(upload, dict):
+            raise ValueError("请选择 CSV / TSV 名单文件，或粘贴学号与姓名两列")
+        filename = str(upload.get("name") or "")
+        if Path(filename).suffix.lower() not in {".csv", ".tsv", ".txt"}:
+            raise ValueError("请将 Excel 名单另存为 CSV / TSV 后导入")
+        if len(str(upload.get("data") or "")) > MAX_ROSTER_BYTES * 4 // 3 + 1024:
+            raise ValueError("名单文件最大 2 MB")
+        content = decode_upload(upload)
+    owner = str(payload.get("_actor_user_id") or "")
+    with EXAM_IMPORT_LOCK:
+        save_roster(IMPORT_ROOT, import_id, content, filename,
+                    sync=lambda path, relative: PLATFORM_PERSISTENCE.sync_file(path, "exam_import", owner, relative))
+    return read_exam_roster(import_id)
+
+
 def delete_exam_import(payload):
     """Archive an import while preserving files used by existing grading jobs."""
     import_id = str(payload.get("import_id") or "").strip()
@@ -494,7 +524,7 @@ def _create_review_report(import_id, normalized_path, imported, card_files,
         _write_json_atomic(report_path, report)
         PLATFORM_PERSISTENCE.sync_tree(review_root, "review", owner_user_id, relative_prefix=Path(review_id))
         report["report_url"] = "/reviews/{}/output/review.json".format(review_id)
-        return report
+        return CANDIDATE_MANAGER.resolve_identity(report)
 
 
 def run_review_job(payload):
@@ -581,6 +611,7 @@ def _write_batch(path, batch):
 
 
 def _compact_review(report, label=""):
+    report = CANDIDATE_MANAGER.resolve_identity(report)
     return {
         "status": "已完成",
         "label": label or report.get("batch_label") or report.get("review_id", ""),
@@ -872,7 +903,7 @@ def read_review_status(review_id):
         if changed:
             _write_review(path, review)
     review["report_url"] = "/reviews/{}/output/review.json".format(clean_id)
-    return review
+    return CANDIDATE_MANAGER.resolve_identity(review)
 
 
 def read_review_source_files(review_id):
@@ -1077,7 +1108,7 @@ def confirm_review_grade(payload):
         record_action(review, payload, "grade.confirmed")
         _write_review(review_path, review)
     review["report_url"] = "/reviews/{}/output/review.json".format(review_id)
-    return review
+    return CANDIDATE_MANAGER.resolve_identity(review)
 
 
 def _has_exportable_score(record):
@@ -1144,7 +1175,7 @@ def save_manual_review(payload):
         check_decisions(payload, review)
         if not payload.get("decisions") and not payload.get("objective_decisions"):
             review["report_url"] = "/reviews/{}/output/review.json".format(review_id)
-            return review
+            return CANDIDATE_MANAGER.resolve_identity(review)
         _ensure_review_scores(review)
         review = apply_manual_review(review, payload.get("decisions", []), payload.get("objective_decisions", []))
         review["grade_confirmed"] = False
@@ -1156,7 +1187,7 @@ def save_manual_review(payload):
         record_action(review, payload, "review.saved")
         _write_review(review_path, review)
     review["report_url"] = "/reviews/{}/output/review.json".format(review_id)
-    return review
+    return CANDIDATE_MANAGER.resolve_identity(review)
 
 
 def run_ai_review(payload):
@@ -1312,7 +1343,7 @@ def start_ai_question_review(payload):
         running = AI_QUESTION_WORKERS.get(key)
         if configured and running and not running.done():
             review["report_url"] = "/reviews/{}/output/review.json".format(review_id)
-            return review
+            return CANDIDATE_MANAGER.resolve_identity(review)
         if configured:
             for item in review.get("items", []):
                 if str(item.get("question", "")).strip() == question:
@@ -1329,7 +1360,7 @@ def start_ai_question_review(payload):
                 bind_context(_ai_question_worker), review_id, question
             )
             review["report_url"] = "/reviews/{}/output/review.json".format(review_id)
-            return review
+            return CANDIDATE_MANAGER.resolve_identity(review)
     return run_ai_question_review({"review_id": review_id, "question": question})
 
 
@@ -1366,7 +1397,7 @@ def start_ai_review(payload):
                     bind_context(_ai_review_worker), review_id
                 )
     review["report_url"] = "/reviews/{}/output/review.json".format(review_id)
-    return review
+    return CANDIDATE_MANAGER.resolve_identity(review)
 
 
 def run_scan_job(files=None, demo=False, template_id=None, owner_user_id="", local_ocr_enabled=None):
@@ -1435,8 +1466,10 @@ def run_scan_job(files=None, demo=False, template_id=None, owner_user_id="", loc
 
 
 from candidate_manager import CandidateManager, grade_confirmation_blockers
+from exam_roster import roster_index
 CANDIDATE_MANAGER = WorkspaceResource(lambda: CandidateManager(lambda: REVIEW_ROOT, _load_review, _write_review,
-                                     AI_REVIEW_LOCK, read_objective_view))
+                                     AI_REVIEW_LOCK, read_objective_view,
+                                     roster_provider=lambda import_id: roster_index(IMPORT_ROOT, import_id)))
 
 
 class ScanUIHandler(BaseHTTPRequestHandler):
@@ -1624,6 +1657,9 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                 values = query.get("review_id", []) + query.get("review_ids", [])
                 selected_ids = [item.strip() for value in values for item in value.split(",") if item.strip()] if values else None
                 self.send_json_download(200, export_confirmed_grades(selected_ids), "考生成绩.json")
+            elif route == "/api/exam/roster":
+                query = parse_qs(parsed.query)
+                self.send_json(200, read_exam_roster((query.get("import_id") or [""])[0]))
             elif route == "/api/exam/imports":
                 self.send_json(200, {"ok": True, "imports": list_exam_imports()})
             elif route == "/api/review/source-files":
@@ -1665,7 +1701,7 @@ class ScanUIHandler(BaseHTTPRequestHandler):
         if route.startswith("/api/admin/"):
             self._admin_request("POST")
             return
-        if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/sheets/preview", "/api/exam/import", "/api/exam/delete", "/api/exam/regrade", "/api/review", "/api/review/batch", "/api/review/scan-preview", "/api/review/ai-judge", "/api/review/ai-judge-question", "/api/review/confirm", "/api/review/confirm-grade", "/api/review/delete", "/api/candidates/delete", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
+        if route not in ("/api/auth/login", "/api/scan", "/api/demo", "/api/sheets", "/api/sheets/preview", "/api/exam/import", "/api/exam/roster", "/api/exam/delete", "/api/exam/regrade", "/api/review", "/api/review/batch", "/api/review/scan-preview", "/api/review/ai-judge", "/api/review/ai-judge-question", "/api/review/confirm", "/api/review/confirm-grade", "/api/review/delete", "/api/candidates/delete", "/api/candidates/save", "/api/candidates/recognize", "/api/templates/create", "/api/templates/update", "/api/templates/activate", "/api/templates/delete"):
             self.send_json(404, {"ok": False, "error": "接口不存在"})
             return
         if route != "/api/auth/login" and not self._authorize(route):
@@ -1696,6 +1732,8 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                 result = CANDIDATE_MANAGER.save(payload)
             elif route == "/api/candidates/recognize":
                 result = CANDIDATE_MANAGER.start(payload)
+            elif route == "/api/exam/roster":
+                result = import_exam_roster(payload)
             elif route == "/api/exam/import":
                 result = run_exam_import(payload)
             elif route == "/api/exam/regrade":

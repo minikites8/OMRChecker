@@ -88,6 +88,7 @@ def candidate_record(review, root):
             'student_name_status':review.get('student_name_status','待识别'),
             'student_name_confidence':review.get('student_name_confidence',0),
             'student_name_source':review.get('student_name_source',''),
+            'roster_matched':bool(review.get('roster_matched')),
             'name_ocr':review.get('name_ocr',''),'name_ocr_error':review.get('name_ocr_error',''),
             'name_recognition_version':review.get('name_recognition_version',0),
             'name_image_url':('/reviews/'+quote(identifier)+'/output/handwriting/identity/name.png') if image.is_file() else '',
@@ -100,23 +101,32 @@ def candidate_record(review, root):
 
 
 class CandidateManager:
-    def __init__(self,root,load,write,review_lock,preview_builder,recognizer=None):
+    def __init__(self,root,load,write,review_lock,preview_builder,recognizer=None,roster_provider=None):
         self.root=root;self.load=load;self.write=write;self.review_lock=review_lock
         self.preview_builder=preview_builder;self.recognizer=recognizer
+        self.roster_provider=roster_provider
         self.executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='candidate-name')
         self.lock=threading.RLock();self.future=None
         self.pending_review_ids=set()
         self.job={'status':'空闲','total':0,'completed':0,'failed':0,'message':''}
 
+    def resolve_identity(self, review, cache=None):
+        from exam_roster import apply_roster_identity
+        import_id=review.get('import_id')
+        cache={} if cache is None else cache
+        if import_id and self.roster_provider and import_id not in cache:
+            cache[import_id]=self.roster_provider(import_id)
+        return apply_roster_identity(review, cache.get(import_id, {}))
+
     def records(self):
-        records=[];skipped=0
+        records=[];skipped=0;rosters={}
         with self.review_lock:
             for path in sorted(Path(self.root()).glob('*/output/review.json'),reverse=True):
                 try:
                     review=json.loads(path.read_text(encoding='utf-8'))
                     # Bind to the directory name so cached data cannot point at another record.
                     review['review_id']=path.parent.parent.name
-                    records.append(candidate_record(review,self.root()))
+                    records.append(candidate_record(self.resolve_identity(review,rosters),self.root()))
                 except (OSError,ValueError,TypeError):skipped+=1
         return records,skipped
 
@@ -128,29 +138,33 @@ class CandidateManager:
     def save(self,payload):
         identifier=valid_id(payload.get('review_id'))
         name=normalize_name(payload.get('student_name'))
-        if len(name)>40 or (name and not all(c.isalpha() or c in " ·•.'-" for c in name)):
-            raise ValueError('姓名请填写 40 字以内的中文或字母')
         sid=str(payload.get('student_id') or '').strip()
         if sid and not re.fullmatch(r'[0-9?]{6,12}',sid):raise ValueError('学号支持 6—12 位数字，空位用 ? 表示')
         paper=str(payload.get('paper_type') or '').strip().upper()
         if paper not in ('','A','B','C'):raise ValueError('试卷类型请选择 A、B 或 C')
         with self.review_lock:
             _,path,review=self.load(identifier)
+            roster_matched=self.resolve_identity({**review, 'student_id':sid}).get('roster_matched')
+            if not roster_matched and (len(name)>40 or (name and not all(c.isalpha() or c in " ·•.'-" for c in name))):
+                raise ValueError('姓名请填写 40 字以内的中文或字母')
+            original_name={key:review.get(key, '') for key in ('student_name','student_name_status','student_name_source')}
             review.setdefault('student_id_ocr',review.get('student_id',''))
             review.update(student_name=name,student_name_status='已确认' if name else '待填写',
                           student_name_source='manual',student_id=sid,paper_type=paper,
                           paper_type_status='人工确认' if paper else '待复核',
                           grade_confirmed=False,grade_confirmed_at='',
                           grade_confirmation_status='待确认',grade_blockers=grade_confirmation_blockers(review))
+            if roster_matched:
+                review.update(original_name)
             self.write(path,review)
-            record=candidate_record(review,self.root())
+            record=candidate_record(self.resolve_identity(review),self.root())
         return {'ok':True,'candidate':record}
 
     def start(self,payload):
         identifiers=payload.get('review_ids')
         if identifiers is None:
             records,_=self.records()
-            identifiers=[r['review_id'] for r in records if not r['name_recognition_version'] and r['student_name_source']!='manual']
+            identifiers=[r['review_id'] for r in records if not r['name_recognition_version'] and r['student_name_source'] not in {'manual','roster'}]
         if not isinstance(identifiers,list) or len(identifiers)>1000:raise ValueError('每次最多识别 1000 份答题卡')
         identifiers=list(dict.fromkeys(valid_id(value) for value in identifiers))
         with self.review_lock, self.lock:

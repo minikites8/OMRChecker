@@ -72,13 +72,14 @@
     $('candidateDetailHeading').textContent=record.student_name||'姓名待确认';
     $('candidateDetailSub').textContent=record.student_id||'学号未识别';
     if(state.dirty&&!force)return;
+    $('candidateName').readOnly=!!record.roster_matched;
     $('candidateName').value=record.student_name||'';$('candidateStudentId').value=record.student_id||'';$('candidatePaperType').value=record.paper_type||'';
     const image=$('candidateNameImage');image.hidden=!record.name_image_url;
     if(record.name_image_url)image.src=record.name_image_url;else image.removeAttribute('src');
     $('candidateNameHint').hidden=!!record.name_image_url;
     const confidence=record.student_name_confidence?(' · 置信度 '+(record.student_name_confidence*100).toFixed(2)+'%'):'';
     $('candidateOcrText').textContent=record.name_ocr_error?'姓名识别异常，可对照原图填写。':record.name_ocr?(record.student_name_source==='ai'?'AI 识别结果：':'识别结果：')+record.name_ocr+confidence:record.name_recognition_version?'姓名待填写或确认':'导入时自动 AI 识别姓名';
-    $('candidateSaveStatus').textContent=record.student_name_status==='已确认'?'姓名已人工确认':'';
+    $('candidateSaveStatus').textContent=record.roster_matched?'姓名来自本场考试名单，按学号匹配':record.student_name_status==='已确认'?'姓名已人工确认':'';
   }
   function selectRecord(record){
     if(state.saving||state.selected===record.review_id)return;
