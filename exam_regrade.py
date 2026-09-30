@@ -58,6 +58,7 @@ def _prepare_review(review, imported, run_id):
             item.pop(key, None)
         item["ai_status"] = "AI待处理"
         item["regrade_id"] = run_id
+    exam_review.attach_structured_ai_groups(refreshed, exam)
     refreshed.pop("ai_question_judgment", None)
     refreshed["ai_judgment"] = {"status": "待运行", "enabled": False, "processed": 0,
                                 "message": "已更新题号、参考答案和分值，等待重新审核"}

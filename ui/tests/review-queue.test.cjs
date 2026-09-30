@@ -23,7 +23,7 @@ test('queue task selection emits a batch selection event',()=>{const f=fixture()
 test('refresh control asks the app to reload queue state',()=>{const f=fixture();let refreshed=0;f.events['platform:batch-refresh']=()=>refreshed++;f.elements.get('gradingQueueRefresh').handlers.click();assert.equal(refreshed,1)});
 test('new submission uses a separate submitting flag and retains a batch queue',()=>{assert.match(app,/reviewState\.submitting=true/);assert.match(app,/batchQueue:\[\]/);assert.match(app,/api\/review\/batch\/queue/);assert.match(app,/review:files-submitted/);assert.match(app,/可继续加入新任务/)});
 test('background work does not lock the file workflow',()=>{assert.match(workflow,/event\.detail\.submitting \?\? event\.detail\.running/);assert.match(workflow,/review:files-submitted/);assert.match(platform,/backgroundRunning/);assert.match(platform,/加入下一批/)});
-test('cache keys load queue assets after the previous scripts',()=>{const html=fs.readFileSync(path.join(root,'ui/index.html'),'utf8');assert.ok(html.indexOf('review-queue.js?v=grading-queue-20260929')<html.indexOf('app.js?v=grading-queue-20260929'));assert.ok(html.includes('review-queue.css?v=grading-queue-20260929'))});
+test('cache keys load queue assets after the previous scripts',()=>{const html=fs.readFileSync(path.join(root,'ui/index.html'),'utf8');const queue=html.indexOf('/static/review-queue.js?v='),app=html.indexOf('/static/app.js?v=');assert.ok(queue>=0&&app>queue);assert.ok(html.includes('review-queue.css?v=grading-queue-20260929'))});
 
 
 function response(body, status=200) {

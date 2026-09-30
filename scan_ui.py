@@ -843,6 +843,21 @@ def _ensure_review_scores(review):
     return refresh_rule_judgments(review) or changed
 
 
+def _ensure_review_ai_groups(review):
+    """Restore source-question groups before each AI job, including saved papers."""
+    from exam_review import attach_structured_ai_groups
+
+    import_id = str(review.get("import_id") or "").strip()
+    if not import_id or not re.fullmatch(r"[A-Za-z0-9_-]+", import_id):
+        return False
+    normalized_path = resolve_under(IMPORT_ROOT, Path(import_id) / "normalized_exam.json")
+    if not normalized_path.is_file():
+        return False
+    imported = json.loads(normalized_path.read_text(encoding="utf-8"))
+    selected = exam_review_variant_for_review(imported, review.get("answer_paper_type", ""))
+    return attach_structured_ai_groups(review, selected.get("exam", {}))
+
+
 def _ensure_review_display_crops(review, review_path):
     """Backfill expanded scan previews while retaining recognition and grading data."""
     from exam_review import DISPLAY_CROP_PADDING_PT, ALGORITHM_CROP_PADDING_PT, regenerate_display_crops
@@ -1193,7 +1208,8 @@ def save_manual_review(payload):
 def run_ai_review(payload):
     with AI_REVIEW_LOCK:
         review_id, review_path, review = _load_review(payload.get("review_id"))
-        if _ensure_review_scores(review):
+        changed = _ensure_review_scores(review)
+        if _ensure_review_ai_groups(review) or changed:
             _write_review(review_path, review)
     base_versions = {str(item["question"]): question_revision(item) for item in review.get("items", [])}
     for item in review.get("items", []):
@@ -1262,32 +1278,43 @@ def _set_review_unconfirmed(review):
 
 
 def run_ai_question_review(payload):
+    from exam_review import review_ai_question_group
+
     with AI_REVIEW_LOCK:
         review_id, review_path, review = _load_review(payload.get("review_id"))
-        if _ensure_review_scores(review):
+        changed = _ensure_review_scores(review)
+        if _ensure_review_ai_groups(review) or changed:
             _write_review(review_path, review)
     question = str(payload.get("question") or "").strip()
-    target = next(
-        (item for item in review.get("items", []) if str(item.get("question", "")).strip() == question),
-        None,
-    )
-    if target is None:
-        raise ValueError("题目{}不存在".format(question or "编号为空"))
-    base_version = question_revision(target)
-    target["handwriting_images"] = [
-        str((review_path.parent / "handwriting" / Path(urlparse(url).path).name).resolve())
-        for url in target.get("handwriting_urls", [])
-    ]
+    group = review_ai_question_group(review, question)
+    base_versions = {str(item["question"]): question_revision(item) for item in group}
+    for item in group:
+        item["handwriting_images"] = [
+            str((review_path.parent / "handwriting" / Path(urlparse(url).path).name).resolve())
+            for url in item.get("handwriting_urls", [])
+        ]
     updated = apply_ai_review_question(review, question)
     with AI_REVIEW_LOCK:
         _id, latest_path, latest = _load_review(review_id)
         by_question = {str(item.get("question")): item for item in updated.get("items", [])}
-        source = by_question.get(question, {})
+        skipped = []
         for item in latest.get("items", []):
-            if str(item.get("question")) == question and question_revision(item) == base_version:
+            item_question = str(item.get("question"))
+            if item_question in base_versions and question_revision(item) == base_versions[item_question]:
+                source = by_question.get(item_question, {})
                 item.update({field: source[field] for field in AI_SINGLE_FIELDS if field in source})
-                break
-        latest["ai_question_judgment"] = updated.get("ai_question_judgment", {})
+            elif item_question in base_versions:
+                skipped.append(item_question)
+                if item.get("ai_status") == "AI处理中":
+                    item["ai_status"] = "AI需复核"
+                    item["ai_score"] = None
+                    item["ai_reason"] = "本题在 AI 审核期间已更新，请核对最新修改后重新审核。"
+        latest["ai_question_judgment"] = dict(updated.get("ai_question_judgment", {}))
+        if skipped:
+            latest["ai_question_judgment"].update(
+                status="部分完成", skipped_questions=skipped,
+                message="整题审核已完成；{} 的最新修改已保留，请复核。".format("、".join(skipped)),
+            )
         latest["review_summary"] = _review_summary(latest.get("items", []))
         latest["score_summary"] = _score_summary(latest)
         _set_review_unconfirmed(latest)
@@ -1296,25 +1323,27 @@ def run_ai_question_review(payload):
     return latest
 
 
-def _ai_question_worker(review_id, question):
-    key = _ai_question_key(review_id, question)
+def _ai_question_worker(review_id, question, key=None):
+    from exam_review import review_ai_question_group
+
+    key = key or _ai_question_key(review_id, question)
     try:
         run_ai_question_review({"review_id": review_id, "question": question})
     except Exception as error:
         with AI_REVIEW_LOCK:
             try:
                 _id, path, review = _load_review(review_id)
-                for item in review.get("items", []):
-                    if str(item.get("question", "")).strip() == str(question).strip():
-                        item["ai_status"] = "AI异常"
-                        item["ai_score"] = None
-                        item["ai_confidence"] = 0.0
-                        item["ai_reason"] = "AI处理失败：{}".format(error)
-                        item["ai_visual_text"] = ""
-                        item["ai_corrected_answer"] = ""
-                        break
+                group = review_ai_question_group(review, question)
+                for item in group:
+                    item["ai_status"] = "AI异常"
+                    item["ai_score"] = None
+                    item["ai_confidence"] = 0.0
+                    item["ai_reason"] = "AI处理失败：{}".format(error)
+                    item["ai_visual_text"] = ""
+                    item["ai_corrected_answer"] = ""
                 review["ai_question_judgment"] = {
                     "question": str(question).strip(), "status": "异常",
+                    "questions": [str(item["question"]) for item in group],
                     "enabled": True, "processed": 0,
                     "message": "AI处理失败：{}".format(error),
                 }
@@ -1330,6 +1359,8 @@ def _ai_question_worker(review_id, question):
 
 
 def start_ai_question_review(payload):
+    from exam_review import review_ai_question_group
+
     question = str(payload.get("question") or "").strip()
     if not question:
         raise ValueError("缺少题目编号")
@@ -1337,27 +1368,29 @@ def start_ai_question_review(payload):
     with AI_REVIEW_LOCK:
         review_id, review_path, review = _load_review(payload.get("review_id"))
         _ensure_review_scores(review)
-        if not any(str(item.get("question", "")).strip() == question for item in review.get("items", [])):
-            raise ValueError("题目{}不存在".format(question))
-        key = _ai_question_key(review_id, question)
+        if _ensure_review_ai_groups(review):
+            _write_review(review_path, review)
+        group = review_ai_question_group(review, question)
+        questions = [str(item["question"]).strip() for item in group]
+        key = _ai_question_key(review_id, questions[0])
         running = AI_QUESTION_WORKERS.get(key)
         if configured and running and not running.done():
             review["report_url"] = "/reviews/{}/output/review.json".format(review_id)
             return CANDIDATE_MANAGER.resolve_identity(review)
         if configured:
-            for item in review.get("items", []):
-                if str(item.get("question", "")).strip() == question:
-                    item["ai_status"] = "AI处理中"
-                    break
+            for item in group:
+                item["ai_status"] = "AI处理中"
             review["ai_question_judgment"] = {
-                "question": question, "status": "处理中", "enabled": True,
+                "question": question, "questions": questions,
+                "major_question": str(group[0].get("major_question") or question),
+                "status": "处理中", "enabled": True,
                 "processed": 0, "group_count": 1, "completed_groups": 0,
-                "message": "正在重新识别第{}题".format(question),
+                "message": "正在整题审核（{}），共 {} 个小空".format("、".join(questions), len(questions)),
             }
             _set_review_unconfirmed(review)
             _write_review(review_path, review)
             AI_QUESTION_WORKERS[key] = AI_REVIEW_EXECUTOR.submit(
-                bind_context(_ai_question_worker), review_id, question
+                bind_context(_ai_question_worker), review_id, question, key
             )
             review["report_url"] = "/reviews/{}/output/review.json".format(review_id)
             return CANDIDATE_MANAGER.resolve_identity(review)

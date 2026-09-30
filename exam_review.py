@@ -1208,6 +1208,48 @@ def _structured_question_labels(question):
     return _local_question_ids(question)
 
 
+def _structured_ai_group_map(exam):
+    """Map native field IDs and printed aliases to their source question."""
+    groups = {}
+    for section_index, section in enumerate(exam.get("sections", [])):
+        for question_index, question in enumerate(section.get("questions", [])):
+            group_key = "{}:{}".format(section_index + 1, question_index + 1)
+            group_label = str(question.get("id") or question.get("title") or question_index + 1)
+            keys = list(question.get("question_ids", []))
+            keys.extend(_structured_question_labels(question))
+            if not keys:
+                keys.append(group_label)
+            for key in keys:
+                if key not in (None, ""):
+                    groups[str(key)] = (group_key, group_label)
+    return groups
+
+
+def attach_structured_ai_groups(review, exam):
+    """Repair grouping in persisted reviews while preserving grading fields."""
+    groups = _structured_ai_group_map(exam)
+    changed = False
+    for item in review.get("items", []):
+        group = groups.get(str(item.get("question", "")))
+        if group and (item.get("ai_group"), item.get("major_question")) != group:
+            item["ai_group"], item["major_question"] = group
+            changed = True
+    return changed
+
+
+def review_ai_question_group(review, question):
+    """Resolve the complete source question for a requested answer-card field."""
+    from ai_judge import _group_key
+
+    question_key = str(question or "").strip()
+    target = next((item for item in review.get("items", [])
+                   if str(item.get("question", "")).strip() == question_key), None)
+    if target is None:
+        raise ValueError("题目{}不存在".format(question_key or "编号为空"))
+    group_key = _group_key(target)
+    return [item for item in review.get("items", []) if _group_key(item) == group_key]
+
+
 def _structured_question_metadata(exam):
     metadata = {}
     for section in exam.get("sections", []):
@@ -1566,26 +1608,27 @@ def apply_ai_review(review, progress_callback=None):
 
 
 def apply_ai_review_question(review, question, progress_callback=None):
-    """只对指定文字题调用 AI，并保留其他题目的已有结果。"""
+    """Submit all blanks of the selected source question and retain other groups."""
     question_key = str(question or "").strip()
-    target = next(
-        (item for item in review.get("items", []) if str(item.get("question", "")).strip() == question_key),
-        None,
-    )
-    if target is None:
-        raise ValueError("题目{}不存在".format(question_key or "编号为空"))
-    target["expected_answer"] = _normalize_correction_expected(
-        target.get("question"), target.get("expected_answer", ""), target.get("source_content", ""),
-    )
+    group = review_ai_question_group(review, question_key)
+    for item in group:
+        item["expected_answer"] = _normalize_correction_expected(
+            item.get("question"), item.get("expected_answer", ""), item.get("source_content", ""),
+        )
     if progress_callback is None:
-        result = judge_handwritten_items([target])
+        result = judge_handwritten_items(group)
     else:
-        result = judge_handwritten_items([target], progress_callback=progress_callback)
-    _apply_ai_review_result(target, result)
+        result = judge_handwritten_items(group, progress_callback=progress_callback)
+    for item in group:
+        _apply_ai_review_result(item, result)
     review["ai_question_judgment"] = {
         key: value for key, value in result.items() if key != "results"
     }
-    review["ai_question_judgment"]["question"] = question_key
+    review["ai_question_judgment"].update(
+        question=question_key,
+        questions=[str(item["question"]).strip() for item in group],
+        major_question=str(group[0].get("major_question") or question_key),
+    )
     return _finalize_ai_review(review)
 
 
@@ -1722,14 +1765,8 @@ def build_review_from_structured(exam_text, answer_text, card_paths, image_dir=N
         card = extract_answer_card(card_paths, image_dir=image_dir)
     selected, selected_type, selection_message = _select_import_variant(imported, card.get("paper_type", ""))
     summary = selected.get("summary", {})
-    group_map = {}
+    group_map = _structured_ai_group_map(selected.get("exam", {}))
     score_map = _structured_score_map(selected.get("exam", {}))
-    for section_index, section in enumerate(selected.get("exam", {}).get("sections", [])):
-        for question_index, question in enumerate(section["questions"]):
-            group_key = "{}:{}".format(section_index + 1, question_index + 1)
-            group_label = str(question.get("id") or question.get("title") or question_index + 1)
-            for subquestion in question.get("question_ids", [group_label]):
-                group_map[str(subquestion)] = (group_key, group_label)
     source_map, answer_map = _structured_alias_maps(
         selected.get("exam", {}), selected.get("source_map", {}), selected.get("answer_map", {})
     )
