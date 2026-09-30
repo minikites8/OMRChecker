@@ -70,3 +70,26 @@ test('saving requires a valid score and button edits enter platform dirty tracki
  assert.ok(app.includes("querySelector('.review-manual-score-input:invalid')"));
  const platform=fs.readFileSync(path.join(__dirname,'../platform.js'),'utf8');assert.ok(platform.includes("matches('input,textarea,select,button.review-verdict-button')"));
 });
+
+for(const [question,maximum,points] of [['31',2,.75],['35',2.5,1.25],['61(1)',.5,.25],['63',3,1.5]]) {
+ test('blank '+question+' accepts intermediate points and synchronizes full/zero buttons',()=>{
+  const f=ui({question,score:maximum,manual_status:'待复核',auto_status:'需人工复核'});
+  assert.ok(f.score);assert.equal(f.score.getAttribute('aria-label'),'第'+question+'题得分');assert.equal(f.score.max,String(maximum));assert.equal(f.score.step,'any');
+  f.score.value=String(points);event(f.score,'input');assert.equal(f.item.manual_score,points);assert.equal(f.context.textLocalStatus(f.item),'部分得分');assert.equal(f.context.textLocalScore(f.item),points);
+  event(f.buttons[1],'click');assert.equal(f.item.manual_score,maximum);assert.equal(f.score.value,String(maximum));
+  event(f.buttons[0],'click');assert.equal(f.item.manual_score,0);assert.equal(f.score.value,'0');
+ });
+}
+test('multi-point blank draft survives collaboration polling and serializes its score',()=>{
+ const session=createSession();const record={review_id:'blank-draft',items:[{question:'31',score:2,manual_status:'待复核'}],objective:[],collaboration:{revision:'r1',questions:{subjective:{31:'q1'},objective:{}}}};
+ let state=session.receive(record,{});state.items[0].manual_score=.75;state.items[0].manual_status='部分得分';
+ assert.equal(session.pending(state).decisions[0].score,.75);
+ state=session.receive({...record,collaboration:{...record.collaboration,revision:'r2'}},state);
+ assert.equal(state.items[0].manual_score,.75);assert.equal(session.pending(state).decisions[0].score,.75);
+ const saved={...record,items:[{...state.items[0]}]};state=session.receive(saved,{});delete state.items[0].manual_score;state.items[0].manual_status='待复核';assert.equal(session.pending(state).decisions[0].score,null);
+});
+test('partial blank points contribute to the browser total and clear pending count',()=>{
+ const item={question:'31',score:2,manual_status:'部分得分',manual_score:.75,ai_status:'AI通过',ai_score:2};
+ const context={reviewState:{items:[item],objective:[],scoreSummary:{}}};vm.runInNewContext(source,context);
+ assert.equal(context.calculateLocalScore().total_score,.75);assert.equal(context.calculateLocalScore().pending_count,0);
+});

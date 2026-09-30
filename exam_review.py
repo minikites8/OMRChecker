@@ -1333,8 +1333,16 @@ def attach_structured_scores(review, exam):
     return review
 
 
+def _supports_manual_score(item):
+    """Enable partial points for non-unit subjective fields and legacy question 64."""
+    if str(item.get("question")) == "64":
+        return True
+    maximum = _validated_score(item.get("score"), item.get("score"))
+    return maximum is not None and maximum > 0 and maximum != 1
+
+
 def _text_final_status(item):
-    if str(item.get("question")) == "64" and item.get("manual_score") is not None:
+    if item.get("manual_score") is not None:
         points = _validated_score(item["manual_score"], item.get("score"))
         if points is None:
             return "待复核"
@@ -1376,7 +1384,7 @@ def _score_summary(review):
         score = float(item.get("score", 0) or 0)
         status = _text_final_status(item)
         awarded = score if status in pass_statuses else 0.0
-        has_manual_points = str(item.get("question")) == "64" and item.get("manual_score") is not None
+        has_manual_points = item.get("manual_score") is not None
         if has_manual_points:
             manual_points = _validated_score(item["manual_score"], score)
             awarded = manual_points if manual_points is not None else 0.0
@@ -1810,11 +1818,11 @@ def apply_manual_review(review, decisions, objective_decisions=None):
         if "score" not in decision and decision.get("status") == "部分得分":
             points = item.get("manual_score")
         if points is not None or decision.get("status") == "部分得分":
-            if question != "64":
-                raise ValueError("仅第64题支持设置得分")
+            if not _supports_manual_score(item):
+                raise ValueError("第{}题请使用正确或不正确设置得分；1分题保留对错判分。".format(question))
             validated = _validated_score(points, item.get("score"))
             if validated is None:
-                raise ValueError("第64题得分须为0到{}之间的有效数字".format(item.get("score", 0)))
+                raise ValueError("第{}题得分须为0到{}之间的有效数字".format(question, item.get("score", 0)))
             manual_scores[question] = validated
     for item in review.get("items", []):
         decision = decision_map.get(item["question"])

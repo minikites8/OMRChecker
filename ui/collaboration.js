@@ -6,11 +6,15 @@
   'use strict';
   const fields = [['items', 'subjective'], ['objective', 'objective']];
   const key = (kind, question) => kind + ':' + String(question);
+  function supportsManualScore(item) {
+    const maximum = Number(item.score);
+    return String(item.question) === '64' || (Number.isFinite(maximum) && maximum > 0 && maximum !== 1);
+  }
   function values(item, kind) {
     const value = kind === 'subjective'
       ? {status: item.manual_status || '', text: item.manual_text || ''}
       : {status: item.manual_status || '', answer: item.reviewed_answer || '', override_answer: Boolean(item.override_answer)};
-    if (kind === 'subjective' && String(item.question) === '64') value.score = item.manual_score ?? null;
+    if (kind === 'subjective' && supportsManualScore(item)) value.score = item.manual_score ?? null;
     return value;
   }
   const equal = (left, right) => JSON.stringify(left) === JSON.stringify(right);
@@ -21,7 +25,7 @@
   }
   function restore(item, kind, value) {
     item.manual_status = value.status;
-    if (kind === 'subjective') { item.manual_text = value.text; if (String(item.question) === '64') { if (value.score == null) delete item.manual_score; else item.manual_score = value.score; } }
+    if (kind === 'subjective') { item.manual_text = value.text; if (Object.hasOwn(value, 'score')) { if (value.score == null) delete item.manual_score; else item.manual_score = value.score; } }
     else { item.reviewed_answer = value.answer; item.override_answer = value.override_answer; }
   }
   function createSession() {

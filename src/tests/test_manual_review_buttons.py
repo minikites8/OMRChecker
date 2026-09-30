@@ -30,9 +30,9 @@ def test_invalid_manual_score_is_rejected(value):
     assert report==before
 
 
-def test_partial_points_are_limited_to_question_64():
-    with pytest.raises(ValueError,match='64'):
-        apply_manual_review(review('63'),[{'question':'63','score':2,'status':'部分得分'}])
+def test_unit_score_blank_keeps_binary_manual_grading():
+    with pytest.raises(ValueError,match='1分'):
+        apply_manual_review(review('63',1),[{'question':'63','score':.5,'status':'部分得分'}])
 
 
 def test_buttons_override_partial_points_and_explicit_clear_restores_ai():
@@ -63,13 +63,14 @@ def test_objective_buttons_still_store_full_or_zero():
         assert report['objective'][0]['awarded_score']==points
 
 
-def test_manual_partial_score_survives_http_save_confirm_and_export(tmp_path,monkeypatch):
+@pytest.mark.parametrize('question,maximum,points', [('64',6,2.5),('31',2,1.25),('35',.5,.25),('63',3,1.5)])
+def test_manual_partial_score_survives_http_save_confirm_and_export(tmp_path,monkeypatch,question,maximum,points):
     import json
     from fastapi.testclient import TestClient
     import backend.app as api
     import scan_ui
     root=tmp_path/'reviews';path=root/'manual-controls'/'output'/'review.json';path.parent.mkdir(parents=True)
-    original=review();original.update(ok=True,student_name='样例考生',student_id='20260001',paper_type='A')
+    original=review(question,maximum);original.update(ok=True,student_name='样例考生',student_id='20260001',paper_type='A')
     path.write_text(json.dumps(original),encoding='utf-8')
     monkeypatch.setattr(scan_ui,'REVIEW_ROOT',root)
     monkeypatch.setattr(scan_ui,'_ensure_review_scores',lambda report:False)
@@ -78,21 +79,21 @@ def test_manual_partial_score_survives_http_save_confirm_and_export(tmp_path,mon
     monkeypatch.setattr(api,'current_user',lambda request:{'id':'teacher','role':'teacher','display_name':'老师'})
     client=TestClient(api.app,raise_server_exceptions=False)
     loaded=client.get('/api/review/status',params={'review_id':'manual-controls'}).json()
-    payload={'review_id':'manual-controls','expected_revision':loaded['collaboration']['revision'],'decisions':[{'question':'64','status':'部分得分','score':2.5}]}
+    payload={'review_id':'manual-controls','expected_revision':loaded['collaboration']['revision'],'decisions':[{'question':question,'status':'部分得分','score':points}]}
     response=client.post('/api/review/confirm',json=payload);assert response.status_code==200,response.text
-    saved=response.json();assert saved['items'][0]['manual_score']==2.5
-    assert saved['score_summary']['total_score']==2.5
+    saved=response.json();assert saved['items'][0]['manual_score']==points
+    assert saved['score_summary']['total_score']==points
     assert saved['grade_confirmation_status']=='待确认' and saved['grade_blockers']==[]
-    disk=json.loads(path.read_text(encoding='utf-8'));assert disk['items'][0]['manual_score']==2.5
+    disk=json.loads(path.read_text(encoding='utf-8'));assert disk['items'][0]['manual_score']==points
     confirmed=client.post('/api/review/confirm-grade',json={'review_id':'manual-controls','expected_revision':saved['collaboration']['revision']})
     assert confirmed.status_code==200,confirmed.text
     assert confirmed.json()['grade_confirmed'] is True
     exported=client.get('/api/candidates/export.json',params={'review_id':'manual-controls'})
     assert exported.status_code==200,exported.text
-    question=exported.json()[0]['questions'][0]
-    assert question['question_id']==64 and question['score']==2.5
-    assert '人工复核' in question['remark']
+    exported_question=exported.json()[0]['questions'][0]
+    assert exported_question['question_id']==int(question) and exported_question['score']==points
+    assert '人工复核' in exported_question['remark']
     before=path.read_bytes()
-    invalid=client.post('/api/review/confirm',json={'review_id':'manual-controls','expected_revision':confirmed.json()['collaboration']['revision'],'decisions':[{'question':'64','status':'部分得分','score':7}]})
+    invalid=client.post('/api/review/confirm',json={'review_id':'manual-controls','expected_revision':confirmed.json()['collaboration']['revision'],'decisions':[{'question':question,'status':'部分得分','score':7}]})
     assert invalid.status_code==400
     assert path.read_bytes()==before

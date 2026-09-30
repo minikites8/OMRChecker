@@ -142,7 +142,10 @@ def check_revision(payload, review):
 
 
 def check_decisions(payload, review):
+    from exam_review import _supports_manual_score
+
     snapshot = describe_review(review)
+    subjective_items = {str(item["question"]): item for item in review.get("items", [])}
     if payload.get("for_confirmation"):
         check_revision(payload, review)
     changed = []
@@ -159,7 +162,7 @@ def check_decisions(payload, review):
                 raise ValueError("复核题号无效或重复")
             seen.add(question)
             allowed_statuses = (None, "", "通过", "不通过", "待复核")
-            if kind == "subjective" and question == "64":
+            if kind == "subjective" and _supports_manual_score(subjective_items[question]):
                 allowed_statuses += ("部分得分",)
             if decision.get("status", "") not in allowed_statuses:
                 raise ValueError("复核结论无效")

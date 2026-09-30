@@ -118,14 +118,14 @@ function reviewStatusClass(status){return status==='自动通过'||status==='AI�
 function formatScore(value){const number=Math.round((Number(value)||0)*100)/100;return Number.isInteger(number)?String(number):number.toFixed(2).replace(/0+$/,'').replace(/\.$/,'')}
 function normalizeObjectiveAnswer(question,value){let answer=String(value||'').toUpperCase().replace(/\s+/g,'');const number=Number(question);if(number>=16&&number<=20)answer=Array.from(new Set(answer.split(''))).sort().join('');if(number>=21&&number<=30){if(['对','正确','TRUE'].includes(answer))answer='T';if(['错','错误','FALSE'].includes(answer))answer='F'}return answer}
 function objectiveLocalStatus(item){if(item.manual_status)return item.manual_status;if(item.override_answer){const answer=normalizeObjectiveAnswer(item.question,item.reviewed_answer),expected=normalizeObjectiveAnswer(item.question,item.expected);return expected?(answer===expected?'通过':'不通过'):'待复核'}return item.auto_status||'待复核'}
-function textLocalStatus(item){if(String(item.question)==='64'&&item.manual_score!==null&&item.manual_score!==undefined){const raw=item.manual_score,points=Number(raw),max=Number(item.score);if(!['number','string'].includes(typeof raw)||String(raw).trim()===''||!Number.isFinite(points)||!Number.isFinite(max)||max<0||points<0||points>max)return'待复核';return points===max?'通过':points===0?'不通过':'部分得分'}if(['通过','不通过'].includes(item.manual_status))return item.manual_status;const ai=item.ai_status,raw=item.ai_score,score=Number(raw),max=Number(item.score);if(['AI通过','AI不通过','AI部分得分'].includes(ai)&&raw!==null&&raw!==undefined){if(!['number','string'].includes(typeof raw)||String(raw).trim()===''||!Number.isFinite(score)||!Number.isFinite(max)||max<0||score<0||score>max)return'待复核';return score===max?'通过':score===0?'不通过':'部分得分'}if(ai==='AI通过')return'通过';if(ai==='AI不通过')return'不通过';if(['AI需复核','AI部分得分'].includes(ai))return'待复核';return item.auto_status||'待复核'}
-function textLocalScore(item){const status=textLocalStatus(item);if(String(item.question)==='64'&&item.manual_score!==null&&item.manual_score!==undefined)return ['通过','不通过','部分得分'].includes(status)?Number(item.manual_score):0;if(status==='部分得分')return Number(item.ai_score);return ['自动通过','通过'].includes(status)?Number(item.score)||0:0}
+function textLocalStatus(item){if(item.manual_score!==null&&item.manual_score!==undefined){const raw=item.manual_score,points=Number(raw),max=Number(item.score);if(!['number','string'].includes(typeof raw)||String(raw).trim()===''||!Number.isFinite(points)||!Number.isFinite(max)||max<0||points<0||points>max)return'待复核';return points===max?'通过':points===0?'不通过':'部分得分'}if(['通过','不通过'].includes(item.manual_status))return item.manual_status;const ai=item.ai_status,raw=item.ai_score,score=Number(raw),max=Number(item.score);if(['AI通过','AI不通过','AI部分得分'].includes(ai)&&raw!==null&&raw!==undefined){if(!['number','string'].includes(typeof raw)||String(raw).trim()===''||!Number.isFinite(score)||!Number.isFinite(max)||max<0||score<0||score>max)return'待复核';return score===max?'通过':score===0?'不通过':'部分得分'}if(ai==='AI通过')return'通过';if(ai==='AI不通过')return'不通过';if(['AI需复核','AI部分得分'].includes(ai))return'待复核';return item.auto_status||'待复核'}
+function textLocalScore(item){const status=textLocalStatus(item);if(item.manual_score!==null&&item.manual_score!==undefined)return ['通过','不通过','部分得分'].includes(status)?Number(item.manual_score):0;if(status==='部分得分')return Number(item.ai_score);return ['自动通过','通过'].includes(status)?Number(item.score)||0:0}
 function calculateLocalScore(){let objective=0,objectivePossible=0,text=0,textPossible=0,pending=0,pendingCount=0;const pass=new Set(['自动通过','通过']),fail=new Set(['不通过']);reviewState.objective.forEach(function(item){const score=Number(item.score)||0,status=objectiveLocalStatus(item);objectivePossible+=score;if(pass.has(status))objective+=score;else if(!fail.has(status)){pending+=score;pendingCount++}});reviewState.items.forEach(function(item){const score=Number(item.score)||0,status=textLocalStatus(item);textPossible+=score;if(pass.has(status)||status==='部分得分')text+=textLocalScore(item);else if(!fail.has(status)){pending+=score;pendingCount++}});const localPossible=objectivePossible+textPossible;if(localPossible===0&&Number(reviewState.scoreSummary.possible_score)>0)return Object.assign({},reviewState.scoreSummary,{pending_count:1});return{total_score:objective+text,possible_score:localPossible,objective_score:objective,objective_possible:objectivePossible,text_score:text,text_possible:textPossible,pending_score:pending,pending_count:pendingCount}}
 function renderScoreBoard(){const score=calculateLocalScore();window.dispatchEvent(new CustomEvent('platform:score',{detail:score}));reviewEl.totalScore.textContent=formatScore(score.total_score)+' / '+formatScore(score.possible_score);reviewEl.objectiveScore.textContent=formatScore(score.objective_score)+' / '+formatScore(score.objective_possible);reviewEl.textScore.textContent=formatScore(score.text_score)+' / '+formatScore(score.text_possible);reviewEl.pendingScore.textContent=formatScore(score.pending_score)+' 分';reviewEl.confirmGrade.disabled=reviewState.submitting||Object.keys(reviewState.aiQuestionBusy).length>0||!reviewState.reviewId||score.pending_count>0||reviewState.gradeConfirmed;reviewEl.confirmGrade.firstElementChild.textContent=reviewState.gradeConfirmed?'结果已确认':'确认结果';reviewEl.save.disabled=reviewState.gradeConfirmed||reviewState.submitting||Object.keys(reviewState.aiQuestionBusy).length>0}
 function objectiveNeedsReview(item){return item.auto_status!=='自动通过'||Boolean(item.override_answer)||Boolean(item.manual_status)}
 function objectiveRecognitionLabel(item){const warning=String(item.recognition_warning||'');if(warning.includes('多处填涂'))return '多处填涂';if(warning)return item.recognized_label||'无法确定';if(item.recognized)return item.recognized;if(item.recognized_label)return item.recognized_label;return '空白'}
 function objectiveFinalLabel(item){if(item.override_answer)return item.reviewed_answer||'空白';if(item.recognition_warning)return '待人工确认';return item.recognized||'空白'}
-function createReviewDecisionButtons(item, onChange) {
+function createReviewDecisionButtons(item, onChange, allowManualScore = false) {
   const group = document.createElement('div'); group.className = 'review-verdict-buttons';
   group.setAttribute('role', 'group'); group.setAttribute('aria-label', '第' + item.question + '题复核结论');
   const buttons = [];
@@ -137,7 +137,7 @@ function createReviewDecisionButtons(item, onChange) {
     button.textContent = label; button.dataset.reviewStatus = status; button.setAttribute('aria-label', '第' + item.question + '题' + label);
     button.addEventListener('click', function () {
       item.manual_status = status;
-      if (String(item.question) === '64') {
+      if (allowManualScore) {
         const maximum = Number(item.score);
         if (Number.isFinite(maximum) && maximum > 0) item.manual_score = status === '通过' ? maximum : 0;
         else delete item.manual_score;
@@ -149,24 +149,29 @@ function createReviewDecisionButtons(item, onChange) {
   });
   group.updateState(); return group;
 }
+function supportsManualScore(item) {
+  const maximum = Number(item.score);
+  return String(item.question) === '64' || (Number.isFinite(maximum) && maximum > 0 && maximum !== 1);
+}
 function createSubjectiveControls(item, onChange) {
   const controls = document.createElement('div'); controls.className = 'review-controls';
+  const allowManualScore = supportsManualScore(item);
   let scoreInput = null;
   const buttons = createReviewDecisionButtons(item, function () {
     if (scoreInput) {
       scoreInput.value = item.manual_score ?? ''; scoreInput.setCustomValidity(''); scoreInput.removeAttribute('aria-invalid');
     }
     onChange();
-  });
+  }, allowManualScore);
   controls.append(buttons);
-  if (String(item.question) === '64') {
+  if (allowManualScore) {
     controls.classList.add('has-manual-score');
     const maximum = Number(item.score), label = document.createElement('label'); label.className = 'review-manual-score';
     label.append(document.createTextNode('得分'));
     scoreInput = document.createElement('input'); scoreInput.type = 'number'; scoreInput.className = 'review-manual-score-input';
     scoreInput.min = '0'; scoreInput.max = String(maximum); scoreInput.step = 'any'; scoreInput.inputMode = 'decimal';
     scoreInput.disabled = !Number.isFinite(maximum) || maximum <= 0;
-    scoreInput.setAttribute('aria-label', '第64题得分'); scoreInput.placeholder = '0–' + maximum;
+    scoreInput.setAttribute('aria-label', '第' + item.question + '题得分'); scoreInput.placeholder = '0–' + maximum;
     scoreInput.value = ['通过','不通过','自动通过','部分得分'].includes(textLocalStatus(item)) ? textLocalScore(item) : '';
     scoreInput.addEventListener('input', function () {
       const raw = scoreInput.value, points = Number(raw);
@@ -245,7 +250,7 @@ function renderWorkspaceStatus(message) {
 }
 async function saveWorkspaceReview(forConfirmation = false, automatic = false) {
   const invalidScore = reviewEl.results.querySelector('.review-manual-score-input:invalid');
-  if (invalidScore) { invalidScore.reportValidity(); throw new Error('请先填写第64题的有效得分'); }
+  if (invalidScore) { invalidScore.reportValidity(); throw new Error('请先填写各题的有效得分'); }
   const payload = workspaceReview.pending(reviewState, forConfirmation);
   const submitted = workspaceReview.capture(reviewState);
   const response = await fetch('/api/review/confirm', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
