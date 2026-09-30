@@ -43,7 +43,7 @@ async function deleteExamImport(importId,name){
     await loadReviewImports(undefined,true);
   }catch(error){showError(error.message)}
 }
-const reviewState={reviewId:'',importId:'',templateId:'',items:[],objective:[],objectiveSummary:{},scoreSummary:{},scoreMap:{},running:false,submitting:false,pollTimer:null,pollBusy:false,aiStartedAt:null,aiPanelPinned:false,elapsedTimer:null,pollErrors:0,batchId:'',batchQueue:[],batchTimer:null,batchBusy:false,batchErrors:0,batchLoaded:false,aiQuestionBusy:{},gradeConfirmed:false};
+const reviewState={reviewId:'',importId:'',templateId:'',items:[],objective:[],objectiveSummary:{},scoreSummary:{},scoreMap:{},running:false,submitting:false,pollTimer:null,pollBusy:false,aiStartedAt:null,aiPanelPinned:false,elapsedTimer:null,pollErrors:0,batchId:'',batchQueue:[],batchTimer:null,batchBusy:false,batchErrors:0,batchPolling:false,batchDelay:3000,batchSnapshot:'',batchLoaded:false,aiQuestionBusy:{},gradeConfirmed:false};
 const reviewEl={importSelect:document.querySelector('#reviewImportSelect'),templateSelect:document.querySelector('#reviewTemplateSelect'),cards:document.querySelector('#reviewCardFiles'),concurrency:document.querySelector('#reviewConcurrency'),button:document.querySelector('#reviewScanButton'),aiButton:document.querySelector('#reviewAiButton'),save:document.querySelector('#reviewSaveButton'),confirmGrade:document.querySelector('#reviewConfirmGradeButton'),status:document.querySelector('#reviewStatus'),results:document.querySelector('#reviewResults'),summary:document.querySelector('#reviewSummary'),paperType:document.querySelector('#reviewPaperType'),objective:document.querySelector('#reviewObjective'),objectiveSummary:document.querySelector('#reviewObjectiveSummary'),totalScore:document.querySelector('#reviewTotalScore'),objectiveScore:document.querySelector('#reviewObjectiveScore'),textScore:document.querySelector('#reviewTextScore'),pendingScore:document.querySelector('#reviewPendingScore'),items:document.querySelector('#reviewItems'),report:document.querySelector('#reviewReportLink'),aiProgress:document.querySelector('#reviewAiProgress'),aiProgressText:document.querySelector('#reviewAiProgressText'),aiElapsed:document.querySelector('#reviewAiElapsed'),aiTrack:document.querySelector('#reviewAiTrack'),aiFill:document.querySelector('#reviewAiFill'),batchPanel:document.querySelector('#reviewBatchPanel'),batchSummary:document.querySelector('#reviewBatchSummary'),batchProgress:document.querySelector('#reviewBatchProgress'),batchList:document.querySelector('#reviewBatchList')};
 function updateReviewButton(){const submitting=Boolean(reviewState.submitting);reviewEl.button.disabled=submitting||!reviewState.importId||!reviewEl.cards.files.length;reviewEl.importSelect.disabled=submitting;reviewEl.cards.disabled=submitting;reviewEl.concurrency.disabled=submitting;reviewEl.templateSelect.disabled=submitting;importEl.button.disabled=submitting;window.dispatchEvent(new CustomEvent('platform:busy',{detail:{running:submitting,submitting,backgroundRunning:reviewState.running}}))}
 function batchTaskActive(task){if(!task||['异常','已取消'].includes(task.status))return false;const done=(Number(task.completed)||0)+(Number(task.failed)||0),total=Number(task.total)||0;const ai=Number(task.ai_processing??(task.reviews||[]).filter(entry=>entry.ai_judgment?.status==='处理中').length)||0;return ai>0||!(['已完成','部分完成'].includes(task.status)||(total>0&&done>=total))}
@@ -63,7 +63,7 @@ reviewEl.cards.addEventListener('change',updateReviewButton);
 function reviewFilePayload(file){return new Promise(function(resolve,reject){const reader=new FileReader();reader.onload=function(){resolve({name:file.name,data:reader.result})};reader.onerror=function(){reject(new Error('读取 '+file.name+' 失败'))};reader.readAsDataURL(file)})}
 async function readReviewResponse(response){const text=await response.text();let result={};try{result=text?JSON.parse(text):{}}catch(error){result={ok:false,error:'服务器返回了无效响应（HTTP '+response.status+'）'}}if(!response.ok||result.ok===false){const message=result.error||result.detail||('复核服务请求失败（HTTP '+response.status+'）');const failure=new Error(message);failure.status=response.status;failure.logTail=result.log_tail||'';throw failure}return result}
 function groupReviewFiles(files){const groups=[],images=[];function flushImages(){while(images.length){const chunk=images.splice(0,2);groups.push({label:'第'+(groups.length+1)+'份照片',files:chunk})}}files.forEach(function(file){if(file.name.toLowerCase().endsWith('.pdf')){flushImages();groups.push({label:file.name.replace(/\.pdf$/i,''),files:[file]})}else{images.push(file)}});flushImages();return groups}
-function stopBatchPolling(){if(reviewState.batchTimer){clearInterval(reviewState.batchTimer);reviewState.batchTimer=null}}
+function stopBatchPolling(){reviewState.batchPolling=false;if(reviewState.batchTimer){clearTimeout(reviewState.batchTimer);reviewState.batchTimer=null}if(reviewState.batchController)reviewState.batchController.abort()}
 async function loadBatchReview(reviewId,showResult=true){if(!reviewId||window.reviewDeletion?.isDeleted(reviewId))return;if(showResult&&reviewId!==reviewState.reviewId){if(window.reviewAutosave){if(!await window.reviewAutosave.flush())return;}else if(!window.platform.confirmSwitch())return;}const selectedBatch=reviewState.batchId;try{const response=await fetch('/api/review/status?review_id='+encodeURIComponent(reviewId));const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'读取批改结果失败');if(!showResult&&(selectedBatch!==reviewState.batchId||reviewState.reviewId||reviewState.submitting||(result.import_id&&result.import_id!==reviewState.importId)))return;if(window.reviewDeletion?.isDeleted(reviewId))return;if(result.import_id&&result.import_id!==reviewState.importId){reviewState.importId=result.import_id;reviewEl.importSelect.value=result.import_id;await loadReviewScoreMap(result.import_id)}renderReview(result,false);if(showResult)window.platform.navigate('results');reviewState.batchLoaded=true;if(result.ai_judgment&&result.ai_judgment.status==='处理中')startReviewPolling()}catch(error){showError(error.message)}}
 function renderBatchStatus(batch){const originalEntries=batch.reviews||[];const keptEntries=originalEntries.filter(entry=>!window.reviewDeletion?.isDeleted(entry.review_id));if(keptEntries.length!==originalEntries.length)batch={...batch,reviews:keptEntries,total:keptEntries.length,completed:keptEntries.filter(entry=>entry.status==='已完成').length,failed:keptEntries.filter(entry=>entry.status==='失败').length};window.dispatchEvent(new CustomEvent('platform:batch',{detail:batch}));reviewEl.batchPanel.classList.remove('hidden');const done=(Number(batch.completed)||0)+(Number(batch.failed)||0),total=Number(batch.total)||0;reviewEl.batchSummary.textContent=(batch.phase||batch.status||'处理中')+' · 并发 '+(batch.concurrency||1)+' 份'+(batch.duration_seconds?' · '+batch.duration_seconds+' 秒':'');reviewEl.batchProgress.textContent=done+' / '+total;reviewEl.batchList.replaceChildren();let firstReady='';(batch.reviews||[]).forEach(function(entry,index){const button=document.createElement('button');button.type='button';button.dataset.reviewId=entry.review_id||'';button.className='batch-review-card '+(entry.status==='失败'?'failed':entry.review_id?'':'processing')+(entry.review_id===reviewState.reviewId?' selected':'');const title=document.createElement('strong');title.textContent=entry.label||('第'+(index+1)+'份');const detail=document.createElement('span');if(entry.status==='失败'){detail.textContent='失败：'+(entry.error||'处理异常')}else if(entry.review_id){const score=entry.score_summary||{},ai=entry.ai_judgment||{};detail.textContent=(entry.student_name?entry.student_name+' · ':'')+(entry.student_id||'学号待识别')+' · '+formatScore(score.total_score)+' / '+formatScore(score.possible_score)+' · '+(ai.status||'规则完成');if(!firstReady)firstReady=entry.review_id;button.addEventListener('click',function(){loadBatchReview(entry.review_id)})}else{detail.textContent=entry.status||'等待中'}button.append(title,detail);reviewEl.batchList.append(button)});if(firstReady&&!reviewState.batchLoaded&&!reviewState.reviewId&&!reviewState.submitting&&(!batch.import_id||batch.import_id===reviewState.importId))loadBatchReview(firstReady,false)}
 function acceptReviewTask(result){
@@ -74,18 +74,39 @@ function acceptReviewTask(result){
 }
 function clearSavedBatch(){saveBatchQueue()}
 async function pollBatchStatus(){
+  if(typeof document!=='undefined'&&document.visibilityState==='hidden'){stopBatchPolling();return}
   const active=(reviewState.batchQueue||[]).filter(batchTaskActive);
   if(!active.length||reviewState.batchBusy)return;
   reviewState.batchBusy=true;
+  const selectedBefore=JSON.stringify(queueTask(reviewState.batchId));
   try{
-    const results=await Promise.all(active.map(async task=>{
+    const results=[];
+    for(let offset=0;offset<active.length;offset+=100){
+      const tasks=active.slice(offset,offset+100),ids=tasks.map(task=>task.batch_id);
+      const controller=typeof AbortController==='function'?new AbortController():null;
+      reviewState.batchController=controller;
+      const timeout=controller?setTimeout(()=>controller.abort(),15000):null;
       try{
-        const response=await fetch('/api/review/batch/status?batch_id='+encodeURIComponent(task.batch_id),{cache:'no-store'});
-        const batch=await readReviewResponse(response);
-        if(batch.batch_id&&batch.batch_id!==task.batch_id)throw new Error('任务进度编号不匹配');
-        return {batch:{...batch,batch_id:task.batch_id}};
-      }catch(error){return {batchId:task.batch_id,error}}
-    }));
+        const query=tasks.length===1?'batch_id='+encodeURIComponent(ids[0]):'batch_ids='+encodeURIComponent(ids.join(','));
+        const response=await fetch('/api/review/batch/status?'+query,{cache:'no-store',...(controller?{signal:controller.signal}:{})});
+        const data=await readReviewResponse(response);
+        if(tasks.length===1){
+          if(data.batch_id&&data.batch_id!==ids[0])throw new Error('任务进度编号不匹配');
+          results.push({batch:{...data,batch_id:ids[0]}});
+        }else{
+          if(!Array.isArray(data.batches)||!Array.isArray(data.errors))throw new Error('批次进度响应格式异常');
+          const batches=new Map(data.batches.map(batch=>[batch.batch_id,batch]));
+          const errors=new Map(data.errors.map(error=>[error.batch_id,error]));
+          for(const id of ids){
+            if(batches.has(id))results.push({batch:batches.get(id)});
+            else{const item=errors.get(id),error=new Error(item?.error||'批次进度尚未返回');error.status=Number(item?.status)||503;results.push({batchId:id,error})}
+          }
+        }
+      }catch(error){
+        if(controller?.signal.aborted&&typeof document!=='undefined'&&document.visibilityState==='hidden')return;
+        results.push(...ids.map(batchId=>({batchId,error})));
+      }finally{if(timeout)clearTimeout(timeout);if(reviewState.batchController===controller)reviewState.batchController=null}
+    }
     let authError=null,transientError=null;const finished=[];
     for(const result of results){
       const id=result.batch?.batch_id||result.batchId;
@@ -99,18 +120,38 @@ async function pollBatchStatus(){
         upsertBatchTask(result.batch);if(!batchTaskActive(result.batch))finished.push(result.batch.message||'批改任务已完成。');
       }
     }
+    const snapshot=JSON.stringify(results.map(result=>result.batch||[result.batchId,result.error?.status]));
+    const changed=snapshot!==reviewState.batchSnapshot;
+    reviewState.batchSnapshot=snapshot;
+    reviewState.batchErrors=transientError?(reviewState.batchErrors||0)+1:0;
+    reviewState.batchDelay=transientError?Math.min(30000,3000*Math.pow(2,Math.min(reviewState.batchErrors,4))):changed?3000:Math.min(15000,(reviewState.batchDelay||3000)*2);
     publishBatchQueue();
     const selected=queueTask(reviewState.batchId);
-    if(selected&&active.some(task=>task.batch_id===selected.batch_id))renderBatchStatus(selected);
+    if(selected&&active.some(task=>task.batch_id===selected.batch_id)&&JSON.stringify(selected)!==selectedBefore)renderBatchStatus(selected);
     if(authError){stopBatchPolling();reviewEl.status.textContent=authError.message;showError(authError.message)}
     else if(transientError)reviewEl.status.textContent='进度查询暂时中断，正在重试；任务继续运行。'+transientError.message;
     else if(!reviewState.running){stopBatchPolling();clearSavedBatch();reviewEl.status.textContent=finished.at(-1)||'批改队列处理完成。'}
     else if(!reviewState.submitting)reviewEl.status.textContent='批改队列运行中，可继续加入新任务。';
-  }catch(error){reviewEl.status.textContent='批改队列进度查询暂时中断，正在重试；任务继续运行。'+error.message}
-  finally{reviewState.batchBusy=false}
+  }catch(error){reviewState.batchDelay=Math.min(30000,(reviewState.batchDelay||3000)*2);reviewEl.status.textContent='批改队列进度查询暂时中断，正在重试；任务继续运行。'+error.message}
+  finally{
+    reviewState.batchBusy=false;
+    if(reviewState.batchPolling&&reviewState.running&&!(typeof document!=='undefined'&&document.visibilityState==='hidden')){
+      if(reviewState.batchTimer)clearTimeout(reviewState.batchTimer);
+      reviewState.batchTimer=setTimeout(pollBatchStatus,reviewState.batchDelay||3000);
+    }
+  }
 }
 
-function startBatchPolling(){if(!(reviewState.batchQueue||[]).some(batchTaskActive))return;stopBatchPolling();reviewState.batchTimer=setInterval(pollBatchStatus,1500);pollBatchStatus()}
+function startBatchPolling(){
+  if(!(reviewState.batchQueue||[]).some(batchTaskActive))return;
+  if(typeof document!=='undefined'&&document.visibilityState==='hidden'){stopBatchPolling();return}
+  reviewState.batchPolling=true;
+  if(reviewState.batchTimer){clearTimeout(reviewState.batchTimer);reviewState.batchTimer=null}
+  if(!reviewState.batchBusy)pollBatchStatus();
+}
+if(typeof document!=='undefined'&&document.addEventListener)document.addEventListener('visibilitychange',function(){
+  if(document.visibilityState==='hidden')stopBatchPolling();else startBatchPolling();
+});
 function resetAiProgress(clearPinned=true){if(reviewState.elapsedTimer){clearInterval(reviewState.elapsedTimer);reviewState.elapsedTimer=null}reviewState.aiStartedAt=null;if(clearPinned)reviewState.aiPanelPinned=false;reviewEl.aiProgress.classList.add('hidden');reviewEl.aiProgress.classList.remove('preparing');reviewEl.aiButton.disabled=false;reviewEl.aiButton.querySelector('span').textContent='AI判断'}
 function updateAiElapsed(){if(reviewState.aiStartedAt){reviewEl.aiElapsed.textContent='已运行 '+Math.floor((Date.now()-reviewState.aiStartedAt)/1000)+' 秒'}}
 function updateAiProgress(ai){const running=ai.status==='处理中';const total=Math.max(0,Number(ai.group_count)||0);const done=Math.min(total,Math.max(0,Number(ai.completed_groups)||0));const visible=running||total>0||reviewState.aiPanelPinned||Boolean(reviewState.aiStartedAt&&ai.status&&ai.status!=='未配置');reviewEl.aiProgress.classList.toggle('hidden',!visible);if(!visible){resetAiProgress(false);return}if(running&&!reviewState.aiStartedAt)reviewState.aiStartedAt=Date.now();if(running&&!reviewState.elapsedTimer){reviewState.elapsedTimer=setInterval(updateAiElapsed,1000)}if(!running&&reviewState.elapsedTimer){clearInterval(reviewState.elapsedTimer);reviewState.elapsedTimer=null}updateAiElapsed();reviewEl.aiProgress.classList.toggle('preparing',running&&total===0);reviewEl.aiTrack.setAttribute('aria-valuemax',String(Math.max(1,total)));reviewEl.aiTrack.setAttribute('aria-valuenow',String(done));reviewEl.aiFill.style.width=(total?Math.round(100*done/total):0)+'%';const label=ai.current_group?'正在审核大题 '+ai.current_group+' · ':'';reviewEl.aiProgressText.textContent=running?(total?label+'已完成 '+done+'/'+total+' 组':'正在准备大题分组...'):(ai.status||'已完成')+' · '+(ai.message||'已完成 '+done+'/'+total+' 组');reviewEl.aiButton.disabled=running;reviewEl.aiButton.querySelector('span').textContent=running?'AI审核进行中…':'AI判断'}

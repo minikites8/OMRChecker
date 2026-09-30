@@ -363,9 +363,9 @@ def review_batch_queue(request: Request) -> JSONResponse:
 
 
 @app.get("/api/review/batch/status")
-def batch_status(request: Request, batch_id: str = "") -> JSONResponse:
+def batch_status(request: Request, batch_id: str = "", batch_ids: Optional[str] = None) -> JSONResponse:
     current_user(request)
-    return _review_response(request, lambda: legacy.read_batch_status(batch_id))
+    return _review_response(request, lambda: legacy.read_batch_statuses(batch_ids) if batch_ids is not None else legacy.read_batch_status(batch_id))
 
 
 @app.post("/api/scan")

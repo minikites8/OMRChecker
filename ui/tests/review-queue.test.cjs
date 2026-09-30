@@ -63,15 +63,15 @@ test('background batches keep upload, import and submission controls enabled',()
 
 test('accepting and polling two batches keeps both IDs and the selected details',async()=>{
   const f=runtimeFixture();f.context.acceptReviewTask(task('a'));f.context.acceptReviewTask(task('b'));f.calls.renders.length=0;
-  const requested=[];f.context.fetch=async url=>{const id=url.split('batch_id=')[1];requested.push(id);return response({ok:true,...task(id)})};
-  await f.context.pollBatchStatus();assert.deepEqual(requested,['a','b']);
+  const requested=[];f.context.fetch=async url=>{const ids=decodeURIComponent(url.split('batch_ids=')[1]).split(',');requested.push(ids);return response({ok:true,batches:ids.map(id=>task(id,'处理中',1)),errors:[]})};
+  await f.context.pollBatchStatus();assert.deepEqual(requested,[['a','b']]);
   assert.deepEqual(JSON.parse(f.storage.get('omrActiveBatchQueue')),['a','b']);
   assert.equal(f.calls.renders.length,1);assert.equal(f.calls.renders[0].batch_id,'b');
 });
 
 test('finishing one batch keeps the next running and completed cards survive queue drain',async()=>{
   const f=runtimeFixture();f.context.acceptReviewTask(task('a'));f.context.acceptReviewTask(task('b'));
-  let allDone=false;f.context.fetch=async url=>{const id=url.split('batch_id=')[1];return response({ok:true,...task(id,id==='a'||allDone?'已完成':'处理中',id==='a'||allDone?3:0)})};
+  let allDone=false;f.context.fetch=async url=>{const query=new URL(url,'https://omr.test').searchParams;const ids=(query.get('batch_ids')||query.get('batch_id')).split(',');const batches=ids.map(id=>task(id,id==='a'||allDone?'已完成':'处理中',id==='a'||allDone?3:0));return response(query.has('batch_ids')?{ok:true,batches,errors:[]}:{ok:true,...batches[0]})};
   await f.context.pollBatchStatus();assert.equal(f.context.reviewState.running,true);assert.equal(f.calls.stop,0);
   assert.deepEqual(JSON.parse(f.storage.get('omrActiveBatchQueue')),['b']);
   allDone=true;await f.context.pollBatchStatus();assert.equal(f.context.reviewState.running,false);assert.equal(f.calls.stop,1);

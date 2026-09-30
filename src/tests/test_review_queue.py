@@ -179,9 +179,9 @@ def test_batch_status_keeps_ai_started_during_the_status_read(review_queue_case,
         latest.update(status="已完成", completed=2, total=2)
         latest["reviews"][1] = {"status": "已完成", "review_id": "second", "ai_judgment": {"status": "处理中"}}
         scan_ui._write_batch(path, latest)
-        return {**report(), **first}
+        return review_id, scan_ui.REVIEW_ROOT / review_id / "output/review.json", {**report(), **first}
 
-    monkeypatch.setattr(scan_ui, "read_review_status", read)
+    monkeypatch.setattr(scan_ui, "_load_review", read)
     result = scan_ui.read_batch_status("ai-race")
     assert result["status"] == "已完成"
     assert result["ai_processing"] == 1

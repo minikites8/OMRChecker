@@ -631,8 +631,9 @@ def _write_batch(path, batch):
     _write_json_atomic(path, batch)
 
 
-def _compact_review(report, label=""):
-    report = CANDIDATE_MANAGER.resolve_identity(report)
+def _compact_review(report, label="", resolve_identity=True):
+    if resolve_identity:
+        report = CANDIDATE_MANAGER.resolve_identity(report)
     return {
         "status": "已完成",
         "label": label or report.get("batch_label") or report.get("review_id", ""),
@@ -794,10 +795,12 @@ def read_batch_status(batch_id):
         if not review_id:
             continue
         try:
-            report = read_review_status(review_id)
+            clean_review_id, _path, report = _load_review(review_id)
+            report["report_url"] = "/reviews/{}/output/review.json".format(clean_review_id)
         except ValueError:
             continue
-        refreshed = _compact_review(report, entry.get("label", ""))
+        # Progress reads use persisted summaries, without score/crop migrations or COS writes.
+        refreshed = _compact_review(report, entry.get("label", ""), resolve_identity=False)
         if refreshed != entry:
             refreshed_entries[index] = refreshed
     if refreshed_entries:
@@ -819,6 +822,22 @@ def read_batch_status(batch_id):
     batch["phase"] = "AI处理中" if ai_running else batch.get("status", "")
     batch["batch_id"] = clean_id
     return batch
+
+
+def read_batch_statuses(batch_ids):
+    """Read up to 100 requested batches in one workspace-scoped request."""
+    ids = str(batch_ids or "").split(",")
+    if not 1 <= len(ids) <= 100 or any(not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", item) for item in ids):
+        raise ValueError("请提供 1 至 100 个有效的批量任务编号")
+    batches, errors = [], []
+    for batch_id in dict.fromkeys(ids):
+        try:
+            batches.append(read_batch_status(batch_id))
+        except ValueError as error:
+            errors.append({"batch_id": batch_id, "status": 400, "error": str(error)})
+        except (OSError, ReviewDataUnavailable):
+            errors.append({"batch_id": batch_id, "status": 503, "error": "批次进度暂不可用，请稍后重试"})
+    return {"ok": True, "batches": batches, "errors": errors}
 
 
 def _load_review(review_id):
@@ -1736,7 +1755,7 @@ class ScanUIHandler(BaseHTTPRequestHandler):
                 self.send_json(200, read_batch_queue())
             elif route == "/api/review/batch/status":
                 query = parse_qs(parsed.query)
-                self.send_json(200, read_batch_status((query.get("batch_id") or [""])[0]))
+                self.send_json(200, (read_batch_statuses(query["batch_ids"][0]) if "batch_ids" in query else read_batch_status((query.get("batch_id") or [""])[0])))
             elif route.startswith("/static/"):
                 self.send_file(resolve_under(UI_ROOT, unquote(route[8:])))
             elif route.startswith("/jobs/"):
