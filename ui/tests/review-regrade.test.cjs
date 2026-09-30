@@ -21,10 +21,10 @@ function fixture(options={}){
     if(failure==='http')return{ok:false,json:async()=>({ok:false,error:'所选卷型尚未导入题目与答案'})};
     if(failure==='busy')return{ok:true,json:async()=>({ok:true,completed:0,reviews:[],skipped_busy:['selected'],regrade_errors:[]})};
     if(failure==='record')return{ok:true,json:async()=>({ok:true,completed:0,reviews:[],skipped_busy:[],regrade_errors:[{review_id:'selected',error:'备份失败'}]})};
-    review={...review,paper_type:body.paper_type||review.paper_type,answer_paper_type:body.paper_type||review.answer_paper_type,grade_confirmed:false};
+    review={...review,import_id:body.answer_import_id||review.import_id,paper_type:body.paper_type||review.paper_type,answer_paper_type:body.paper_type||review.answer_paper_type,grade_confirmed:false};
     return{ok:true,json:async()=>({ok:true,total:1,completed:1,ai_processing:1,batch_id:'single-batch',reviews:[{review_id:'selected'}],skipped_busy:[],regrade_errors:[]})};
    }
-   if(url.startsWith('/api/exam/answers'))return{ok:true,json:async()=>({ok:true,name:'双卷考试',paper_types:types})};
+   if(url.startsWith('/api/exam/answers'))return{ok:true,json:async()=>({ok:true,name:options.name||'双卷考试',paper_types:types,...(options.sources?{regrade_sources:options.sources}:{})})};
    return{ok:true,json:async()=>structuredClone(review)};
   }};
  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../review-regrade.js'),'utf8'),context);
@@ -96,4 +96,45 @@ test('view result action opens the exact selected sheet',async()=>{
 test('library, candidate rows and result toolbar expose single-review actions',()=>{
  const root=path.join(__dirname,'..'),platform=fs.readFileSync(path.join(root,'platform.js'),'utf8'),candidates=fs.readFileSync(path.join(root,'candidates.js'),'utf8'),html=fs.readFileSync(path.join(root,'index.html'),'utf8');
  assert.ok(platform.includes('regrade.dataset.regradeReview = record.review_id'));assert.ok(candidates.includes("regrade.setAttribute('data-regrade-review',record.review_id)"));assert.ok(html.includes('id="reviewRegradeButton"'));assert.ok(html.includes('/static/review-regrade.js?'));assert.ok(html.includes('/static/review-regrade.css?'));
+});
+const separateSources=['A','B','C'].map(kind=>({value:'paper-'+kind+':'+kind,import_id:'paper-'+kind,paper_type:kind,name:'软件'+kind+'卷',label:kind+' 卷 · 软件'+kind+'卷'}));
+test('separate B import displays B and its actual reference name',async()=>{
+ const f=fixture({types:[],sources:separateSources,name:'软件B卷',review:{import_id:'paper-B',paper_type:'B',answer_paper_type:''}});
+ await f.open();const select=f.get('singleReviewPaperType');assert.equal(select.value,'paper-B:B');assert.equal(select.disabled,false);
+ assert.deepEqual(select.children.map(x=>x.textContent),['请选择卷型与参考试卷','A 卷 · 软件A卷','B 卷 · 软件B卷','C 卷 · 软件C卷']);
+ await f.submit();assert.deepEqual(f.posts()[0].body,{import_id:'paper-B',review_ids:['selected'],paper_type:'B'});
+});
+test('saved B choice selects separately imported B from stale A association',async()=>{
+ const f=fixture({types:[],sources:separateSources,review:{import_id:'paper-A',paper_type:'B',answer_paper_type:'A'}});
+ await f.open();assert.equal(f.get('singleReviewPaperType').value,'paper-B:B');await f.submit();
+ assert.deepEqual(f.posts()[0].body,{import_id:'paper-A',review_ids:['selected'],paper_type:'B',answer_import_id:'paper-B'});
+ assert.equal(f.renders[0].record.import_id,'paper-B');
+});
+test('choosing a different independent type submits its actual import',async()=>{
+ const f=fixture({types:[],sources:separateSources,review:{import_id:'paper-B',paper_type:'B'}});
+ await f.open();f.select('paper-C:C');await f.submit();assert.deepEqual(f.posts()[0].body,{import_id:'paper-B',review_ids:['selected'],paper_type:'C',answer_import_id:'paper-C'});
+ assert.match(f.status(),/软件C卷/);
+});
+test('single separately imported B retains a descriptive fixed option',async()=>{
+ const f=fixture({types:[],sources:[separateSources[1]],review:{import_id:'paper-B',paper_type:'B'}});
+ await f.open();assert.equal(f.get('singleReviewPaperType').value,'paper-B:B');assert.equal(f.get('singleReviewPaperType').disabled,true);
+ assert.equal(f.get('singleReviewPaperType').children[0].textContent,'B 卷 · 软件B卷');assert.equal(f.button('按所选卷型重新批改').disabled,false);
+});
+test('duplicate target B requires explicit import selection',async()=>{
+ const extra={...separateSources[1],value:'paper-B-copy:B',import_id:'paper-B-copy',label:'B 卷 · 软件B卷 · paper-B-copy'};
+ const f=fixture({types:[],sources:[...separateSources,extra],review:{import_id:'paper-A',paper_type:'B'}});
+ await f.open();assert.equal(f.get('singleReviewPaperType').value,'');assert.equal(f.button('按所选卷型重新批改').disabled,true);
+ f.select(extra.value);await f.submit();assert.equal(f.posts()[0].body.answer_import_id,'paper-B-copy');
+});
+test('missing selected independent type keeps submission pending',async()=>{
+ const f=fixture({types:[],sources:separateSources.filter(s=>s.paper_type!=='B'),review:{import_id:'paper-A',paper_type:'B'}});
+ await f.open();assert.equal(f.get('singleReviewPaperType').value,'');assert.equal(f.button('按所选卷型重新批改').disabled,true);assert.equal(f.posts().length,0);
+});
+test('plain reference option shows imported name',async()=>{
+ const f=fixture({types:[],name:'期中考试'});await f.open();assert.equal(f.get('singleReviewPaperType').children[0].textContent,'当前试卷答案 · 期中考试');
+});
+test('one available reference remains selectable when saved type is missing',async()=>{
+ const f=fixture({types:[],sources:[separateSources[0]],review:{import_id:'paper-A',paper_type:'B'}});
+ await f.open();assert.equal(f.get('singleReviewPaperType').value,'');assert.equal(f.get('singleReviewPaperType').disabled,false);assert.equal(f.button('按所选卷型重新批改').disabled,true);
+ f.select('paper-A:A');await f.submit();assert.equal(f.posts()[0].body.paper_type,'A');
 });

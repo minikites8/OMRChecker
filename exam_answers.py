@@ -11,6 +11,7 @@ from pathlib import Path
 import exam_review
 from exam_import import answer_map, _normalize_answer
 from exam_regrade import _busy, _prepare_review
+from exam_paper_sources import regrade_sources
 from review_collaboration import record_action
 
 
@@ -70,7 +71,8 @@ def read_exam_answers(import_id, paper_type=""):
     import scan_ui as service
     with service.EXAM_IMPORT_LOCK, service.AI_REVIEW_LOCK:
         import_id, _path, imported = service._review_import({"import_id": import_id})
-        return _view(import_id, imported, paper_type)
+        return {**_view(import_id, imported, paper_type),
+                "regrade_sources": regrade_sources(import_id, imported)}
 
 
 def _validate_answers(question, values):

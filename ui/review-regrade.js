@@ -1,7 +1,7 @@
 /* Regrade one persisted answer sheet against an explicitly selected paper variant. */
 (function () {
   'use strict';
-  function regradePayload(review, reviewId, choices, selectedType) {
+  function regradePayload(review, reviewId, choices, selectedType, source = null) {
     if (!/^[A-Za-z0-9_-]+$/.test(String(reviewId || '')) || review?.review_id !== reviewId) throw new Error('答卷记录已更新，请重新选择');
     if (!/^[A-Za-z0-9_-]+$/.test(String(review.import_id || ''))) throw new Error('请先为这份答卷关联已导入的试卷');
     const payload = {import_id: review.import_id, review_ids: [reviewId]};
@@ -9,16 +9,38 @@
       if (!choices.includes(selectedType)) throw new Error('请选择该试卷已导入的卷型');
       payload.paper_type = selectedType;
     }
+    if (source) {
+      if (!/^[A-Za-z0-9_-]+$/.test(String(source.import_id || '')) || source.paper_type !== selectedType) throw new Error('请选择有效的参考试卷');
+      if (source.import_id !== review.import_id) payload.answer_import_id = source.import_id;
+    }
     return payload;
   }
   function chosenType(review, choices) {
     const value = String(review.paper_type || review.answer_paper_type || '').trim().toUpperCase();
     return choices.includes(value) ? value : '';
   }
+  function sourceChoices(imported, review) {
+    if (Array.isArray(imported.regrade_sources) && imported.regrade_sources.length) return imported.regrade_sources;
+    const name = imported.name || review.import_id;
+    return (imported.paper_types || []).length ? imported.paper_types.map(kind => ({value: kind, import_id: review.import_id, paper_type: kind, name, label: kind + ' 卷 · ' + name})) : [{value: '', import_id: review.import_id, paper_type: '', name, label: '当前试卷答案 · ' + name}];
+  }
+  function chosenSource(review, sources) {
+    const kind = String(review.paper_type || review.answer_paper_type || '').trim().toUpperCase();
+    const current = sources.filter(source => source.import_id === review.import_id);
+    if (kind) {
+      const matches = sources.filter(source => source.paper_type === kind);
+      const exact = matches.find(source => source.import_id === review.import_id);
+      if (exact) return exact.value;
+      if (matches.length === 1) return matches[0].value;
+      if (matches.length === 0 && current.length === 1 && !current[0].paper_type) return current[0].value;
+      return '';
+    }
+    return current.length === 1 ? current[0].value : '';
+  }
   function busy(review) {
     return review?.ai_judgment?.status === '处理中' || review?.ai_question_judgment?.status === '处理中';
   }
-  if (typeof module !== 'undefined') module.exports = {regradePayload, chosenType, busy};
+  if (typeof module !== 'undefined') module.exports = {regradePayload, chosenType, sourceChoices, chosenSource, busy};
   if (typeof document === 'undefined') return;
   const el = (tag, className, text) => {
     const node = document.createElement(tag); if (className) node.className = className;
@@ -38,11 +60,16 @@
   const view = el('button', 'button button-secondary', '查看本卷成绩'); view.type = 'button'; view.hidden = true;
   const submit = el('button', 'button button-primary', '按所选卷型重新批改'); submit.type = 'button';
   actions.append(cancel, view, submit); dialog.append(title, identity, note, label, hint, status, actions); document.body.append(dialog);
-  const state = {review: null, choices: [], version: 0, loading: false, submitting: false, completed: false, opener: null};
+  const state = {review: null, choices: [], sources: [], version: 0, loading: false, submitting: false, completed: false, opener: null};
   function message(text, error = false) { status.textContent = text; status.classList.toggle('is-error', error); }
+  function selectedSource() { return state.sources.find(source => source.value === select.value); }
+  function showSource() {
+    const source = selectedSource();
+    hint.textContent = source ? '题目、参考答案和分值来自《' + source.name + '》（' + source.import_id + '）；本次处理当前这一份答卷。' : '请选择已导入的卷型与参考试卷；同名多份试卷通过导入编号区分。';
+  }
   function controls() {
-    select.disabled = state.loading || state.submitting || state.completed || !state.choices.length;
-    submit.disabled = state.loading || state.submitting || state.completed || !state.review || (state.choices.length > 0 && !state.choices.includes(select.value));
+    select.disabled = state.loading || state.submitting || state.completed || (state.sources.length <= 1 && Boolean(selectedSource()));
+    submit.disabled = state.loading || state.submitting || state.completed || !state.review || !selectedSource();
     submit.textContent = state.submitting ? '正在提交…' : '按所选卷型重新批改';
     cancel.disabled = state.submitting;
     dialog.setAttribute('aria-busy', String(state.loading || state.submitting));
@@ -55,7 +82,7 @@
   }
   async function open(reviewId, opener) {
     if (state.submitting) return;
-    const version = ++state.version; state.review = null; state.choices = []; state.loading = true; state.completed = false; state.opener = opener || document.activeElement;
+    const version = ++state.version; state.review = null; state.choices = []; state.sources = []; state.loading = true; state.completed = false; state.opener = opener || document.activeElement;
     view.hidden = true; select.replaceChildren(); identity.textContent = '答卷 ' + reviewId; message('正在读取答卷与可用卷型…'); controls();
     if (!dialog.open) dialog.showModal();
     try {
@@ -65,13 +92,14 @@
       if (busy(review)) throw new Error('这份答卷正在 AI 处理中，请待本次处理完成后重新批改');
       const imported = await request('/api/exam/answers?' + new URLSearchParams({import_id: review.import_id}));
       if (version !== state.version) return;
-      state.review = review; state.choices = imported.paper_types || [];
+      state.review = review; state.sources = sourceChoices(imported, review);
+      state.choices = [...new Set(state.sources.map(source => source.paper_type).filter(Boolean))];
       identity.textContent = [review.student_name || '姓名待确认', review.student_id ? '学号 ' + review.student_id : reviewId, imported.name || review.import_id].join(' · ');
-      const types = state.choices.length ? ['', ...state.choices] : [''];
-      types.forEach(key => { const option = el('option', '', key ? key + ' 卷' : state.choices.length ? '请选择卷型' : '统一试卷答案'); option.value = key; select.append(option); });
-      select.value = chosenType(review, state.choices);
-      hint.textContent = state.choices.length ? '题目内容、参考答案和分值统一使用所选卷型；本次处理范围为当前这一份答卷。' : '该试卷使用一套参考答案；本次处理范围为当前这一份答卷。';
-      message(state.choices.length && !select.value ? '请选择卷型后开始重新批改。' : '请核对卷型，再点击重新批改。');
+      const preferred = chosenSource(review, state.sources);
+      if (state.sources.length > 1 || !state.sources.some(source => source.value === preferred)) { const option = el('option', '', '请选择卷型与参考试卷'); option.value = ''; select.append(option); }
+      state.sources.forEach(source => { const option = el('option', '', source.label); option.value = source.value; select.append(option); });
+      select.value = preferred; showSource();
+      message(selectedSource() ? '请核对卷型及参考试卷，再点击重新批改。' : '请选择对应卷型的参考试卷后开始重新批改。');
     } catch (error) { if (version === state.version) { state.review = null; message(error.message, true); } }
     finally { if (version === state.version) { state.loading = false; controls(); } }
   }
@@ -84,7 +112,9 @@
     state.submitting = true; controls();
     try {
       const reviewId = state.review.review_id;
-      const payload = regradePayload(state.review, reviewId, state.choices, select.value);
+      const source = selectedSource();
+      if (!source) throw new Error("请选择对应卷型的参考试卷");
+      const payload = regradePayload(state.review, reviewId, source.paper_type ? state.choices : [], source.paper_type, source);
       if (window.reviewAutosave && !(await window.reviewAutosave.flush())) { message('请先处理当前答卷的保存提示，再重新批改。', true); return; }
       message('正在按' + (payload.paper_type ? payload.paper_type + ' 卷' : '本卷') + '答案重新批改…');
       const result = await request('/api/exam/regrade', payload);
@@ -94,7 +124,7 @@
       if (!(result.reviews || []).some(item => item.review_id === reviewId)) throw new Error('这份答卷尚未完成重批提交，请刷新后重试');
       state.completed = true; view.hidden = false;
       if (typeof acceptReviewTask === 'function') acceptReviewTask(result);
-      const chosen = payload.paper_type ? payload.paper_type + ' 卷' : '本卷';
+      const chosen = (payload.paper_type ? payload.paper_type + ' 卷 · ' : '') + '《' + source.name + '》';
       message(result.ai_processing ? '已按' + chosen + '答案提交本卷 AI 重判，可在批改队列查看进度。' : '本卷已按' + chosen + '答案重新批改，请复核并重新确认成绩。');
       try {
         const current = await request('/api/review/status?review_id=' + encodeURIComponent(reviewId));
@@ -107,7 +137,7 @@
     } catch (error) { message(error.message, true); }
     finally { state.submitting = false; controls(); }
   }
-  select.addEventListener('change', () => { controls(); message(select.value ? '本次将使用 ' + select.value + ' 卷的题目、答案与分值。' : '请选择卷型后开始重新批改。'); });
+  select.addEventListener('change', () => { controls(); showSource(); const source = selectedSource(); message(source ? '本次将使用《' + source.name + '》的题目、答案与分值。' : '请选择卷型与参考试卷后开始重新批改。'); });
   submit.addEventListener('click', regrade); cancel.addEventListener('click', dismiss);
   dialog.addEventListener('cancel', event => { event.preventDefault(); dismiss(); });
   view.addEventListener('click', async () => { const id = state.review?.review_id; if (id && typeof loadBatchReview === 'function') { await loadBatchReview(id); dismiss(); } });
