@@ -27,7 +27,7 @@
   function button(text, className = 'button button-secondary') { const el = node('button', className, text); el.type = 'button'; return el; }
   function option(value, label) { const el = node('option', '', label); el.value = value; return el; }
   function field(text, control) { const label = node('label', 'roster-field'); label.append(node('span', '', text), control); return label; }
-  const state = {data: null, busy: false, loading: false, page: 1, sequence: 0, importsSequence: 0};
+  const state = {data: null, busy: false, loading: false, page: 1, sequence: 0, importsSequence: 0, importsKey: null, request: null, refreshTimer: null, refreshAgain: false, eventKeys: new Map()};
   const panel = node('article', 'panel exam-roster'), heading = node('div', 'section-heading'), intro = node('div');
   intro.append(node('h2', '', '考试名单与缺考核对'), node('p', '', '提前导入应考名单，按学号匹配答卷，统一使用名单姓名。'));
   const refresh = button('刷新出勤'); heading.append(intro, refresh);
@@ -62,7 +62,7 @@
   function updateControls() {
     exam.disabled = state.busy; file.disabled = state.busy; paste.disabled = state.busy;
     importButton.disabled = state.busy || state.loading || !exam.value; refresh.disabled = state.busy || state.loading || !exam.value;
-    exportButton.disabled = state.busy || state.loading || !state.data?.summary?.absent;
+    exportButton.disabled = state.busy || state.data?.import_id !== exam.value || !state.data?.summary?.absent;
     importButton.textContent = state.busy ? '正在导入…' : '导入本场考试名单';
   }
   function draw() {
@@ -83,27 +83,89 @@
     pageText.textContent='共 '+rows.length+' 条 · 第 '+state.page+' / '+pages+' 页'; previous.disabled=state.page===1;next.disabled=state.page===pages;
     updateControls();
   }
-  async function refreshAttendance() {
-    if (state.busy) return;
-    const id=exam.value,sequence=++state.sequence; state.data=null; state.loading=!!id; message.textContent=''; draw();
-    if (!id) return;
-    try {
-      const data=await request('/api/exam/roster?import_id='+encodeURIComponent(id)); if(sequence!==state.sequence)return;
-      state.data=data; message.textContent=data.skipped?'有 '+data.skipped+' 份答卷读取异常，缺考结果待核实。':data.has_roster?'已载入 '+data.summary.expected+' 人名单 · '+(data.filename||'已保存名单'):'';
-    } catch(error) { if(sequence===state.sequence)message.textContent=error.message; }
-    finally { if(sequence===state.sequence){state.loading=false;draw();} }
+  function cancelScheduledRefresh() {
+    clearTimeout(state.refreshTimer); state.refreshTimer = null;
   }
-  function setExams(imports) {
-    if(state.busy)return;
-    const selected=exam.value; exam.replaceChildren(option('','请选择考试'));
-    imports.forEach(item=>exam.append(option(item.import_id,item.name||item.import_id)));
-    exam.value=imports.some(item=>item.import_id===selected)?selected:(imports[0]?.import_id||'');
-    state.page=1; return refreshAttendance();
+  function scheduleRefresh() {
+    if (location.hash !== '#candidates' || !exam.value) return;
+    if (state.busy) { state.refreshAgain = true; return; }
+    if (state.request?.id === exam.value) { state.request.dirty = true; return; }
+    if (state.refreshTimer !== null) return;
+    state.refreshTimer = setTimeout(() => {
+      state.refreshTimer = null;
+      if (location.hash === '#candidates') refreshAttendance();
+    }, 100);
+  }
+  function refreshAttendance() {
+    if (state.busy) return;
+    cancelScheduledRefresh();
+    const id = exam.value;
+    if (state.request?.id === id) return state.request.promise;
+    const sequence = ++state.sequence, sameExam = state.data?.import_id === id;
+    if (!sameExam) { state.data = null; state.page = 1; message.textContent = ''; }
+    state.loading = !!id;
+    if (sameExam) updateControls(); else draw();
+    if (!id) { state.request = null; return; }
+    const pending = {id, sequence, dirty: false, promise: null};
+    state.request = pending;
+    pending.promise = (async () => {
+      let redraw = !sameExam;
+      try {
+        const data = await request('/api/exam/roster?import_id=' + encodeURIComponent(id));
+        if (sequence !== state.sequence) return;
+        // Keep the existing table and pagination when polling returns the same data.
+        if (JSON.stringify(data) !== JSON.stringify(state.data)) { state.data = data; redraw = true; }
+        const text = data.skipped ? '有 ' + data.skipped + ' 份答卷读取异常，缺考结果待核实。' : data.has_roster ? '已载入 ' + data.summary.expected + ' 人名单 · ' + (data.filename || '已保存名单') : '';
+        if (message.textContent !== text) message.textContent = text;
+      } catch (error) {
+        if (sequence === state.sequence) message.textContent = error.message;
+      } finally {
+        if (sequence === state.sequence) {
+          state.loading = false; state.request = null;
+          if (redraw) draw(); else updateControls();
+          if (pending.dirty) scheduleRefresh();
+        }
+      }
+    })();
+    return pending.promise;
+  }
+  function refreshForEvent(event) {
+    if (location.hash !== '#candidates' || !exam.value) return;
+    const value = event.type === 'platform:review' ? event.detail?.result : event.detail;
+    if (!value || value.import_id && value.import_id !== exam.value) return;
+    let key, fingerprint;
+    if (event.type === 'platform:batch') {
+      if (!value.batch_id) return;
+      key = 'batch:' + value.batch_id;
+      fingerprint = JSON.stringify([value.completed || 0, value.failed || 0,
+        (value.reviews || []).map(row => [row.review_id, row.status]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))]);
+    } else {
+      if (!value.review_id) return;
+      key = 'review:' + value.review_id;
+      fingerprint = event.type === 'platform:review-deleted' ? 'deleted' : JSON.stringify([value.import_id || exam.value, String(value.student_id || '')]);
+    }
+    if (state.eventKeys.get(key) === fingerprint) return;
+    state.eventKeys.set(key, fingerprint);
+    scheduleRefresh();
+  }
+  function setExams(imports, forceRefresh = false) {
+    if (state.busy) return;
+    const selected = exam.value, key = JSON.stringify(imports.map(item => [item.import_id, item.name]));
+    if (key !== state.importsKey) {
+      state.importsKey = key;
+      exam.replaceChildren(option('', '请选择考试'));
+      imports.forEach(item => exam.append(option(item.import_id, item.name || item.import_id)));
+      exam.value = imports.some(item => item.import_id === selected) ? selected : (imports[0]?.import_id || '');
+    }
+    const changed = exam.value !== selected;
+    if (changed) { cancelScheduledRefresh(); state.eventKeys.clear(); state.page = 1; }
+    if (location.hash === '#candidates' && (changed || forceRefresh || exam.value && !state.data)) return refreshAttendance();
+    updateControls();
   }
   async function loadExams() {
     if(window.omrWorkspaceReady&&!await window.omrWorkspaceReady)return;
     const sequence=++state.importsSequence;
-    try { const data=await request('/api/exam/imports'); if(sequence===state.importsSequence)await setExams(data.imports||[]); }
+    try { const data=await request('/api/exam/imports'); if(sequence===state.importsSequence)await setExams(data.imports||[],true); }
     catch(error){if(sequence===state.importsSequence)message.textContent=error.message;}
   }
   function download(text,name){const url=URL.createObjectURL(new Blob([text],{type:'text/csv;charset=utf-8'})),link=node('a');link.href=url;link.download=name;document.body.append(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
@@ -114,7 +176,7 @@
     if(!upload&&!content.trim()){message.textContent='请选择名单文件或粘贴学号与姓名两列';return;}
     if(upload&&upload.size>2*1024*1024){message.textContent='名单文件最大 2 MB';return;}
     if(state.data?.has_roster&&!window.confirm('确认替换本场考试的 '+state.data.summary.expected+' 人名单？系统将按新名单重新匹配姓名与出勤。'))return;
-    state.busy=true;state.loading=false;++state.sequence;updateControls();message.textContent='正在校验并保存名单…';
+    state.busy=true;state.loading=false;++state.sequence;cancelScheduledRefresh();state.request=null;state.refreshAgain=false;updateControls();message.textContent='正在校验并保存名单…';
     try {
       const payload=upload?{import_id:id,file:await readFile(upload)}:{import_id:id,content};
       const data=await request('/api/exam/roster',payload);state.data=data;state.page=1;
@@ -123,15 +185,15 @@
       await window.candidates?.refresh(false);
       window.dispatchEvent(new CustomEvent('platform:roster',{detail:{import_id:id}}));
     }catch(error){message.textContent=error.message;}
-    finally{state.busy=false;draw();}
+    finally{state.busy=false;draw();if(state.refreshAgain){state.refreshAgain=false;scheduleRefresh();}}
   });
-  exam.addEventListener('change',()=>{state.page=1;refreshAttendance();}); refresh.addEventListener('click',refreshAttendance);
+  exam.addEventListener('change',()=>{cancelScheduledRefresh();state.eventKeys.clear();state.page=1;refreshAttendance();}); refresh.addEventListener('click',refreshAttendance);
   filter.addEventListener('change',()=>{state.page=1;draw();});search.addEventListener('input',()=>{state.page=1;draw();});
   previous.addEventListener('click',()=>{state.page--;draw();});next.addEventListener('click',()=>{state.page++;draw();});
   template.addEventListener('click',()=>download(rosterTemplateCSV(),'考生名单录入模板.csv'));
-  exportButton.addEventListener('click',()=>{if(state.data&&!state.loading)download(rosterCSV(attendanceRows(state.data,'absent','')),'缺考名单_'+state.data.import_id+'.csv');});
+  exportButton.addEventListener('click',()=>{if(state.data?.import_id===exam.value&&!state.busy)download(rosterCSV(attendanceRows(state.data,'absent','')),'缺考名单_'+state.data.import_id+'.csv');});
   window.addEventListener('platform:imports',event=>{++state.importsSequence;setExams(event.detail||[]);});
-  window.addEventListener('hashchange',()=>{if(location.hash==='#candidates')loadExams();});
-  ['platform:review','platform:review-deleted','platform:identity','platform:batch'].forEach(name=>window.addEventListener(name,()=>{if(location.hash==='#candidates')refreshAttendance();}));
+  window.addEventListener('hashchange',()=>{if(location.hash==='#candidates')loadExams();else cancelScheduledRefresh();});
+  ['platform:review','platform:review-deleted','platform:identity','platform:batch'].forEach(name=>window.addEventListener(name,refreshForEvent));
   draw(); if(location.hash==='#candidates')loadExams();
 })();
