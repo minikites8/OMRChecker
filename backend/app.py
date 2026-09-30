@@ -544,6 +544,9 @@ def artifact(asset_type: str, asset_path: str, request: Request):
         path = legacy.resolve_under(root, asset_path)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
+    cos_url = legacy.artifact_cos_url(path)
+    if cos_url:
+        return RedirectResponse(cos_url, status_code=302, headers={"Cache-Control": "no-store"})
     if not path.is_file():
         raise HTTPException(status_code=404, detail="文件不存在")
     return FileResponse(path)

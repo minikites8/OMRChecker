@@ -83,6 +83,16 @@ def install_fastapi_workspaces(app, server, get_user, get_store, auth_enabled=No
     from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
     from starlette.concurrency import run_in_threadpool
 
+    async def browser_response(response):
+        if 'application/json' in response.headers.get('content-type', ''):
+            body = b''.join([part async for part in response.body_iterator])
+            result = await run_in_threadpool(server.browser_payload, json.loads(body))
+            headers = dict(response.headers)
+            headers.pop('content-length', None)
+            headers['Cache-Control'] = 'no-store'
+            return JSONResponse(result, status_code=response.status_code, headers=headers)
+        return response
+
     @app.middleware('http')
     async def workspace_boundary(request, call_next):
         # ASGI path preserves decoded filenames containing # and ? characters.
@@ -125,15 +135,7 @@ def install_fastapi_workspaces(app, server, get_user, get_store, auth_enabled=No
                 request.scope['path'] = route
                 request.scope['raw_path'] = quote(route, safe='/').encode('ascii')
                 with workspace_scope(workspace, url_prefix='/api/w' if path.startswith('/api/w/') else '/w'):
-                    response = await call_next(request)
-                    if 'application/json' in response.headers.get('content-type', ''):
-                        body = b''.join([part async for part in response.body_iterator])
-                        result = scoped_payload(json.loads(body))
-                        headers = dict(response.headers)
-                        headers.pop('content-length', None)
-                        headers['Cache-Control'] = 'no-store'
-                        return JSONResponse(result, status_code=response.status_code, headers=headers)
-                    return response
+                    return await browser_response(await call_next(request))
             if tenant_route(route) and (auth_enabled() if auth_enabled else server.AUTH_SERVICE.enabled):
                 user = await run_in_threadpool(get_user, request)
                 if is_legacy_objective_asset(request.method, route):
@@ -141,7 +143,8 @@ def install_fastapi_workspaces(app, server, get_user, get_store, auth_enabled=No
                     target = '/api/w/shared' + path + ('?' + request.url.query if request.url.query else '')
                     return RedirectResponse(target, status_code=302, headers={'Cache-Control': 'no-store'})
                 raise WorkspaceError(409, '请先选择阅卷工作区')
-            return await call_next(request)
+            response = await call_next(request)
+            return await browser_response(response) if tenant_route(route) else response
         except WorkspaceError as error:
             return JSONResponse({'ok': False, 'error': str(error), 'workspaces_url': '/workspaces'}, status_code=error.status, headers={'Cache-Control': 'no-store'})
         except HTTPException as error:

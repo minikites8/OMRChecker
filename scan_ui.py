@@ -246,6 +246,27 @@ def latest_result_csv(output_dir):
     return max(files, key=lambda path: path.stat().st_mtime)
 
 
+def browser_payload(payload):
+    """Apply workspace links and resolve cloud media only in HTTP responses."""
+    payload = scoped_payload(payload)
+    return PLATFORM_PERSISTENCE.resolve_asset_urls(payload) if getattr(PLATFORM_PERSISTENCE, "enabled", False) else payload
+
+
+def artifact_cos_url(path):
+    if not getattr(PLATFORM_PERSISTENCE, "enabled", False):
+        return ""
+    path = Path(path).resolve()
+    for route, root in (("reviews", REVIEW_ROOT), ("imports", IMPORT_ROOT), ("jobs", JOBS_ROOT)):
+        try:
+            relative = path.relative_to(root.resolve())
+        except ValueError:
+            continue
+        url = "/{}/{}".format(route, quote(relative.as_posix()))
+        resolved = PLATFORM_PERSISTENCE.resolve_asset_urls(url)
+        return resolved if resolved != url else ""
+    return ""
+
+
 def job_url(job_id, job_root, file_path):
     try:
         relative = file_path.resolve().relative_to(job_root.resolve())
@@ -1475,7 +1496,7 @@ def run_scan_job(files=None, demo=False, template_id=None, owner_user_id="", loc
         raise ScanFailure("扫描程序退出状态为 {}".format(completed.returncode), log)
     csv_path = latest_result_csv(output_dir)
     columns, rows = read_results(csv_path, job_id, job_root)
-    PLATFORM_PERSISTENCE.sync_tree(job_root, "scan_job", owner_user_id)
+    PLATFORM_PERSISTENCE.sync_tree(job_root, "scan_job", owner_user_id, relative_prefix=Path(job_id))
     PLATFORM_PERSISTENCE.record_job(
         job_id,
         owner_user_id,
@@ -1522,7 +1543,7 @@ class ScanUIHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def send_json(self, status, payload, headers=None):
-        content = json.dumps(scoped_payload(payload), ensure_ascii=False).encode("utf-8")
+        content = json.dumps(browser_payload(payload), ensure_ascii=False).encode("utf-8")
         self.send_bytes(status, content, "application/json; charset=utf-8", headers=headers)
 
     def send_redirect(self, location, headers=None):
@@ -1577,6 +1598,10 @@ class ScanUIHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def send_file(self, path):
+        cos_url = artifact_cos_url(path)
+        if cos_url:
+            self.send_redirect(cos_url)
+            return
         if not path.is_file():
             self.send_json(404, {"ok": False, "error": "文件不存在"})
             return

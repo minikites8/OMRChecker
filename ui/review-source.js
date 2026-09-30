@@ -41,7 +41,8 @@
       if (!data.ok || data.review_id !== id || !Array.isArray(data.files))
         throw new Error(data.error || '扫描叠加 PDF 列表格式异常');
       files = data.files.filter(file => file && typeof file.name === 'string' &&
-        typeof file.url === 'string' && /^\/(?:reviews|(?:api\/)?w)\//.test(file.url));
+        typeof file.url === 'string' && (/^\/(?:reviews|(?:api\/)?w)\//.test(file.url) ||
+          /^https:\/\/[a-z0-9-]+\.cos\.[a-z0-9-]+\.myqcloud\.com\//i.test(file.url)));
       if (!files.length) { status.textContent = '当前答卷暂无可用的扫描文件。'; return; }
       files.forEach((file, index) => {
         const option = document.createElement('option'); option.value = String(index); option.textContent = file.name;

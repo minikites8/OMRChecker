@@ -77,3 +77,18 @@ test('preview loads after grouping and has accessible controls',()=>{
  assert.match(html,/title="选择题与填空题扫描叠加 PDF 预览"/);
  assert.match(html,/id="scanPreviewStatus" role="status" aria-live="polite"/);
 });
+
+test('COS scan PDF opens directly with its signed URL intact', async () => {
+ const url='https://bucket.cos.ap-test.myqcloud.com/jobs/preview.pdf?q-signature=test&sign=value';
+ const f=fixture(()=>({...result(),pdf_url:url}));await f.files([file('one.pdf')]);
+ assert.equal(f.elements.get('scanPreviewFrame').src,url+'#view=FitH');
+ assert.equal(f.elements.get('scanPreviewOpen').href,url);
+ assert.equal(f.elements.get('scanPreviewFrame').hidden,false);
+});
+for(const url of ['https://example.test/file.pdf','https://bucket.cos.ap-test.myqcloud.com.evil.test/file.pdf','http://bucket.cos.ap-test.myqcloud.com/file.pdf']) {
+ test('preview validates COS origin: '+url,async()=>{
+  const f=fixture(()=>({...result(),pdf_url:url}));await f.files([file('one.pdf')]);
+  assert.equal(f.elements.get('scanPreviewFrame').hidden,true);
+  assert.equal(f.elements.get('scanPreviewRetry').hidden,false);
+ });
+}

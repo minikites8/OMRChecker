@@ -114,3 +114,16 @@ test('updated scan recognition refreshes the overlay for the same review', async
   f.emit('platform:review', { result: {review_id:'r1', objective:[{question:'1', recognized:'B'}]} });
   await tick(); assert.equal(f.requests.length, 2);
 });
+
+test('COS overlay PDF keeps its absolute signed URL', async () => {
+ const url='https://bucket.cos.ap-test.myqcloud.com/review/answer.pdf?q-signature=test&sign=value';
+ const f=fixture(()=>result('r1',[{...pdf(),url}]));await f.review();
+ assert.equal(f.elements.get('reviewSourceOpen').href,url);
+ assert.equal(f.elements.get('reviewSourceOpen').hidden,false);
+});
+for(const url of ['https://example.test/file.pdf','https://bucket.cos.ap-test.myqcloud.com.evil.test/file.pdf','http://bucket.cos.ap-test.myqcloud.com/file.pdf']) {
+ test('overlay validates COS origin: '+url,async()=>{
+  const f=fixture(()=>result('r1',[{...pdf(),url}]));await f.review();
+  assert.equal(f.elements.get('reviewSourceOpen').hidden,true);
+ });
+}

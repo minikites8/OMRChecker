@@ -187,6 +187,17 @@ class PostgresStore:
             )
         return artifact_id
 
+    def find_artifacts(self, object_keys: list[str]) -> list[dict]:
+        """Fetch registered object metadata in one parameterized query."""
+        if not object_keys:
+            return []
+        with self.connection() as connection:
+            rows = connection.execute(
+                "SELECT object_key, content_type, size_bytes FROM platform_artifacts "
+                "WHERE object_key = ANY(%s)", (list(object_keys),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def record_job(self, job_id: str, owner_user_id: str, kind: str, status: str, payload: dict) -> None:
         with self.connection() as connection:
             connection.execute(
