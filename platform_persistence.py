@@ -6,7 +6,7 @@ import mimetypes
 import re
 from pathlib import Path
 from typing import Optional
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 from platform_config import PlatformSettings
 from platform_cos import TencentCosStorage
@@ -74,6 +74,9 @@ class PlatformPersistence:
                 or any(character in relative for character in ("\\", "\x00", ":"))):
             return ""
         content_type = mimetypes.guess_type(relative)[0] or ""
+        # COS default-domain responses can force downloads; explicit PDF previews stay local.
+        if content_type == "application/pdf" and parse_qs(parsed.query).get("preview") == ["1"]:
+            return ""
         if content_type != "application/pdf" and not content_type.startswith("image/"):
             return ""
         kind = {"reviews": "review", "imports": "exam_import", "jobs": "scan_job"}[match.group(1)]

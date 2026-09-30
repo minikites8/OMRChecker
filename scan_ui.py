@@ -253,7 +253,9 @@ def browser_payload(payload):
     return PLATFORM_PERSISTENCE.resolve_asset_urls(payload) if getattr(PLATFORM_PERSISTENCE, "enabled", False) else payload
 
 
-def artifact_cos_url(path):
+def artifact_cos_url(path, *, preview=False):
+    if preview and Path(path).suffix.lower() == ".pdf":
+        return ""
     if not getattr(PLATFORM_PERSISTENCE, "enabled", False):
         return ""
     path = Path(path).resolve()
@@ -1007,7 +1009,8 @@ def create_scan_preview(payload):
     PLATFORM_PERSISTENCE.sync_tree(output.parent, "scan_job", str(payload.get("_actor_user_id") or ""),
                                    relative_prefix=output.parent.resolve().relative_to(JOBS_ROOT.resolve()))
     return {"ok": True, "preview_id": preview_id,
-            "pdf_url": "/jobs/{}/scan-overlay.pdf".format(preview_id), **result}
+            "pdf_url": "/jobs/{}/scan-overlay.pdf".format(preview_id),
+            "preview_url": "/jobs/{}/scan-overlay.pdf?preview=1".format(preview_id), **result}
 
 
 def read_review_overlay_pdf(review_id):
@@ -1045,6 +1048,8 @@ def read_review_overlay_pdf(review_id):
         return {"ok": True, "review_id": clean_id,
                 "files": [{"name": "答卷扫描叠加.pdf", "size": destination.stat().st_size,
                            "url": "/reviews/{}/output/scan_overlay/{}".format(
+                               quote(clean_id, safe=""), destination.name),
+                           "preview_url": "/reviews/{}/output/scan_overlay/{}?preview=1".format(
                                quote(clean_id, safe=""), destination.name)}]}
 
 
@@ -1618,7 +1623,9 @@ class ScanUIHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def send_file(self, path):
-        cos_url = artifact_cos_url(path)
+        preview = (path.suffix.lower() == ".pdf"
+                   and parse_qs(urlparse(self.path).query).get("preview") == ["1"])
+        cos_url = artifact_cos_url(path, preview=preview)
         if cos_url:
             self.send_redirect(cos_url)
             return
@@ -1630,6 +1637,9 @@ class ScanUIHandler(BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(os.fstat(source.fileno()).st_size))
+            if preview:
+                self.send_header("Content-Disposition", "inline")
+                self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             shutil.copyfileobj(source, self.wfile, length=256 * 1024)

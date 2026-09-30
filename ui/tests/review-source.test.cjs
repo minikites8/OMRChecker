@@ -127,3 +127,15 @@ for(const url of ['https://example.test/file.pdf','https://bucket.cos.ap-test.my
   assert.equal(f.elements.get('reviewSourceOpen').hidden,true);
  });
 }
+
+test('review overlay opens the explicit inline PDF URL ahead of COS download',async()=>{
+ const local='/reviews/r1/output/scan_overlay/answer.pdf?preview=1';
+ const f=fixture(()=>result('r1',[{...pdf(),url:'https://bucket.cos.ap-test.myqcloud.com/scan.pdf?q-signature=test',preview_url:local}]));
+ await f.review();
+ assert.equal(f.elements.get('reviewSourceOpen').href,'/api/w/shared'+local);
+ assert.equal(f.requests.length,1);
+});
+test('review overlay validates the explicit preview URL',async()=>{
+ const f=fixture(()=>result('r1',[{...pdf(),preview_url:'javascript:alert(1)'}]));
+ await f.review();assert.equal(f.elements.get('reviewSourceOpen').hidden,true);
+});

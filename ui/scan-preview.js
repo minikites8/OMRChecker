@@ -23,11 +23,12 @@
     status.textContent = ''; status.dataset.state = '';
   }
   function display(data, group) {
-    if (!data.ok || typeof data.pdf_url !== 'string' ||
-        !/^\/(?:jobs|(?:api\/)?w)\//.test(data.pdf_url) &&
-        !/^https:\/\/[a-z0-9-]+\.cos\.[a-z0-9-]+\.myqcloud\.com\//i.test(data.pdf_url)) throw new Error('扫描预览地址异常');
-    const url = /^https:\/\//i.test(data.pdf_url) ? data.pdf_url :
-      window.omrApiUrl ? window.omrApiUrl(data.pdf_url) : data.pdf_url;
+    const previewUrl = data.preview_url || data.pdf_url;
+    if (!data.ok || typeof previewUrl !== 'string' ||
+        !/^\/(?:jobs|(?:api\/)?w)\//.test(previewUrl) &&
+        !/^https:\/\/[a-z0-9-]+\.cos\.[a-z0-9-]+\.myqcloud\.com\//i.test(previewUrl)) throw new Error('扫描预览地址异常');
+    const url = /^https:\/\//i.test(previewUrl) ? previewUrl :
+      window.omrApiUrl ? window.omrApiUrl(previewUrl) : previewUrl;
     frame.src = url + '#view=FitH'; frame.hidden = false;
     open.href = url; open.hidden = false;
     const warnings = Array.isArray(data.warnings) ? data.warnings.filter(item => typeof item === 'string') : [];

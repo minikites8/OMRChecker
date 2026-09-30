@@ -20,7 +20,8 @@
   function selectFile() {
     const file = files[Number(select.value) || 0];
     if (!file) return;
-    open.href = window.omrApiUrl ? window.omrApiUrl(file.url) : file.url;
+    const url = file.preview_url || file.url;
+    open.href = window.omrApiUrl ? window.omrApiUrl(url) : url;
     open.title = '查看扫描叠加 PDF：' + file.name;
     open.hidden = false;
     status.textContent = file.name + ' · 选择题叠加层 + 填空题扫描叠加层；在新标签页打开，保留当前阅卷进度。';
@@ -40,9 +41,12 @@
       if (current !== sequence) return;
       if (!data.ok || data.review_id !== id || !Array.isArray(data.files))
         throw new Error(data.error || '扫描叠加 PDF 列表格式异常');
-      files = data.files.filter(file => file && typeof file.name === 'string' &&
-        typeof file.url === 'string' && (/^\/(?:reviews|(?:api\/)?w)\//.test(file.url) ||
-          /^https:\/\/[a-z0-9-]+\.cos\.[a-z0-9-]+\.myqcloud\.com\//i.test(file.url)));
+      files = data.files.filter(file => {
+        const url = file && (file.preview_url || file.url);
+        return file && typeof file.name === 'string' && typeof url === 'string' &&
+          (/^\/(?:reviews|(?:api\/)?w)\//.test(url) ||
+           /^https:\/\/[a-z0-9-]+\.cos\.[a-z0-9-]+\.myqcloud\.com\//i.test(url));
+      });
       if (!files.length) { status.textContent = '当前答卷暂无可用的扫描文件。'; return; }
       files.forEach((file, index) => {
         const option = document.createElement('option'); option.value = String(index); option.textContent = file.name;

@@ -92,3 +92,17 @@ for(const url of ['https://example.test/file.pdf','https://bucket.cos.ap-test.my
   assert.equal(f.elements.get('scanPreviewRetry').hidden,false);
  });
 }
+
+test('explicit inline PDF preview takes precedence over COS download URL',async()=>{
+ const local='/jobs/scan-preview-one/scan-overlay.pdf?preview=1';
+ const remote='https://bucket.cos.ap-test.myqcloud.com/scan.pdf?q-signature=test';
+ const f=fixture(()=>({...result(),pdf_url:remote,preview_url:local}));await f.files([file('one.pdf')]);
+ assert.equal(f.elements.get('scanPreviewFrame').src,'/api/w/shared'+local+'#view=FitH');
+ assert.equal(f.elements.get('scanPreviewOpen').href,'/api/w/shared'+local);
+ assert.equal(f.requests.length,1);
+});
+test('invalid explicit preview URL is rejected before displaying COS fallback',async()=>{
+ const f=fixture(()=>({...result(),preview_url:'javascript:alert(1)'}));await f.files([file('one.pdf')]);
+ assert.equal(f.elements.get('scanPreviewFrame').hidden,true);
+ assert.equal(f.elements.get('scanPreviewStatus').dataset.state,'error');
+});

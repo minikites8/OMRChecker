@@ -562,11 +562,17 @@ def artifact(asset_type: str, asset_path: str, request: Request):
         path = legacy.resolve_under(root, asset_path)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
-    cos_url = legacy.artifact_cos_url(path)
+    preview = path.suffix.lower() == ".pdf" and request.query_params.getlist("preview") == ["1"]
+    cos_url = legacy.artifact_cos_url(path, preview=preview)
     if cos_url:
         return RedirectResponse(cos_url, status_code=302, headers={"Cache-Control": "no-store"})
     if not path.is_file():
         raise HTTPException(status_code=404, detail="文件不存在")
+    if preview:
+        return FileResponse(path, media_type="application/pdf", headers={
+            "Content-Disposition": "inline", "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        })
     return FileResponse(path)
 
 
