@@ -32,10 +32,21 @@
     const match = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})/.exec(id || '');
     return match ? `${match[1]}-${match[2]}-${match[3]} ${match[4]}:${match[5]}` : '已导入试卷';
   }
-  const core = { route, isPending, csvCell, matchingPapers, pageSlice, formatImportDate };
+  function matchingReviewRecords(records, confirmation = 'all') {
+    return records.filter(record => record.review_id && (confirmation !== 'unconfirmed' || !record.grade_confirmed));
+  }
+  function nextUnconfirmedReview(records, currentId) {
+    const start = records.findIndex(record => record.review_id === currentId);
+    for (let offset = 1; offset <= records.length; offset++) {
+      const record = records[(start + offset) % records.length];
+      if (record.review_id && record.review_id !== currentId && !record.grade_confirmed) return record;
+    }
+    return null;
+  }
+  const core = { matchingReviewRecords, nextUnconfirmedReview, route, isPending, csvCell, matchingPapers, pageSlice, formatImportDate };
   if (typeof module === 'object' && module.exports) { module.exports = core; return; }
   const $ = id => document.getElementById(id);
-  const model = { imports: [], records: new Map(), current: null, batch: null, page: 1, filter: 'all', dirty: false, ready: false, historyLoading: false };
+  const model = { imports: [], records: new Map(), current: null, batch: null, page: 1, filter: 'all', confirmationFilter: 'all', recordSwitchLoading: false, dirty: false, ready: false, historyLoading: false };
   const number = value => String(Math.round((Number(value) || 0) * 100) / 100);
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -223,6 +234,7 @@
     applyFilter();
   }));
   function recordStatus(record) {
+    if (record.grade_confirmed) return ['已确认', 'success'];
     if (record.status === '失败') return ['失败', 'danger'];
     if (record.ai_judgment?.status === '处理中') return ['AI 审核中', 'processing'];
     if (!record.review_id) return [record.status || '等待中', 'processing'];
@@ -286,22 +298,75 @@
       row.append(titleCell, scoreCell, statusCell, actionCell); body.append(row);
     });
     if (!rows.length) emptyRow(body, 4, model.ready ? '还没有批改记录，上传答题卡开始批改。' : '批改记录加载中…');
-    const selector = $('reviewRecordSelect');
-    const selected = model.current?.review_id || ''; selector.replaceChildren();
-    const ready = rows.filter(record => record.review_id);
-    if (!selected && ready.length) {
-      const placeholder = element('option', '', '请选择批改记录'); placeholder.value = ''; selector.append(placeholder);
+    renderRecordPicker(rows);
+  }
+  function reviewRecords() {
+    return Array.from(model.records.values()).filter(record => !window.reviewDeletion?.isDeleted(record.review_id)).reverse();
+  }
+  function recordNavigationBusy() {
+    return model.recordSwitchLoading || Boolean(typeof reviewState !== 'undefined' && reviewState.submitting);
+  }
+  function renderRecordPicker(rows = reviewRecords()) {
+    const selector = $('reviewRecordSelect'), selected = model.current?.review_id || '';
+    const ready = matchingReviewRecords(rows, model.confirmationFilter);
+    const unconfirmed = matchingReviewRecords(rows, 'unconfirmed');
+    const all = matchingReviewRecords(rows), hasSelected = ready.some(record => record.review_id === selected);
+    const busy = recordNavigationBusy();
+    selector.replaceChildren();
+    if (!hasSelected) {
+      const message = !ready.length ? (all.length ? '试卷已全部确认' : '暂无可复核试卷') :
+        (selected && model.confirmationFilter === 'unconfirmed' ? '当前试卷已确认，请选择未确认试卷' : '请选择批改记录');
+      const placeholder = element('option', '', message); placeholder.value = ''; selector.append(placeholder);
     }
     ready.forEach(record => {
-      const option = element('option', '', (record.student_name ? record.student_name + ' · ' : '') + (record.student_id ? record.student_id + ' · ' : '') + (record.label || record.review_id));
+      const option = element('option', '', (record.grade_confirmed ? '已确认 · ' : '未确认 · ') +
+        (record.student_name ? record.student_name + ' · ' : '') + (record.student_id ? record.student_id + ' · ' : '') + (record.label || record.review_id));
       option.value = record.review_id; selector.append(option);
     });
-    selector.value = selected; $('reviewRecordPicker').hidden = !ready.length || (ready.length === 1 && Boolean(selected));
+    selector.value = hasSelected ? selected : ''; selector.disabled = busy || !ready.length;
+    $('reviewRecordPicker').hidden = !all.length && !selected;
+    $('reviewConfirmationFilter').value = model.confirmationFilter;
+    $('reviewConfirmationFilter').disabled = busy;
+    $('reviewRecordCount').textContent = '共 ' + all.length + ' 份 · 未确认 ' + unconfirmed.length + ' 份';
+    const next = nextUnconfirmedReview(rows, selected);
+    const button = $('reviewNextUnconfirmedButton');
+    button.disabled = busy || !next;
+    button.title = next ? '保存当前修改后，按列表顺序切换到下一份未确认试卷；到末尾后从头查找' :
+      (unconfirmed.length ? '当前是最后一份未确认试卷' : '试卷已全部确认');
+    button.setAttribute('aria-busy', String(model.recordSwitchLoading));
   }
-  const picker = element('label', 'record-picker'); picker.id = 'reviewRecordPicker'; picker.hidden = true;
-  picker.append(element('span', '', '切换试卷')); const select = element('select'); select.id = 'reviewRecordSelect'; picker.append(select);
-  $('reviewEmpty').before(picker);
-  select.addEventListener('change', async () => { await loadBatchReview(select.value); select.value = model.current?.review_id || ''; });
+  async function switchReviewRecord(reviewId) {
+    if (!reviewId || reviewId === model.current?.review_id || recordNavigationBusy()) return;
+    if (typeof workspaceBusy !== 'undefined' && workspaceBusy && !window.reviewAutosave?.saving) {
+      toast('当前试卷正在同步或确认，请稍后切换。'); renderRecordPicker(); return;
+    }
+    model.recordSwitchLoading = true; renderRecordPicker();
+    try {
+      // The shared loader flushes drafts and keeps the current paper on save failure.
+      await loadBatchReview(reviewId);
+    } catch (error) { toast(error.message); }
+    finally { model.recordSwitchLoading = false; renderRecordPicker(); }
+  }
+  const picker = element('div', 'record-picker'); picker.id = 'reviewRecordPicker'; picker.hidden = true;
+  const confirmationLabel = element('label'); confirmationLabel.append(element('span', '', '确认状态'));
+  const confirmation = element('select'); confirmation.id = 'reviewConfirmationFilter';
+  confirmation.setAttribute('aria-label', '确认状态筛选');
+  [['all', '全部试卷'], ['unconfirmed', '未确认试卷']].forEach(([value, label]) => {
+    const option = element('option', '', label); option.value = value; confirmation.append(option);
+  });
+  confirmationLabel.append(confirmation);
+  const selectionLabel = element('label'); selectionLabel.append(element('span', '', '切换试卷'));
+  const select = element('select'); select.id = 'reviewRecordSelect'; select.setAttribute('aria-label', '切换试卷'); selectionLabel.append(select);
+  const count = element('span'); count.id = 'reviewRecordCount'; count.setAttribute('role', 'status'); count.setAttribute('aria-live', 'polite');
+  picker.append(confirmationLabel, selectionLabel, count); $('reviewEmpty').before(picker);
+  confirmation.addEventListener('change', () => {
+    model.confirmationFilter = confirmation.value === 'unconfirmed' ? 'unconfirmed' : 'all'; renderRecordPicker();
+  });
+  select.addEventListener('change', () => switchReviewRecord(select.value));
+  $('reviewNextUnconfirmedButton').addEventListener('click', async () => {
+    const next = nextUnconfirmedReview(reviewRecords(), model.current?.review_id || '');
+    if (next) await switchReviewRecord(next.review_id);
+  });
   function renderMetrics(score) {
     const pending = currentPending();
     $('statPending').textContent = pending; $('navPending').textContent = pending;
@@ -348,8 +413,8 @@
       if (record.review_id) model.records.delete(pendingKey);
       // Preserve unsaved on-screen scores while a batch poll is in flight.
       if (record.review_id && record.review_id === model.current?.review_id) {
-        model.records.set(record.review_id, { ...record, score_summary: calculateLocalScore() });
-      } else model.records.set(record.review_id || pendingKey, record);
+        model.records.set(record.review_id, { ...model.records.get(record.review_id), ...record, grade_confirmed: Boolean(model.current.grade_confirmed) && !model.dirty, score_summary: calculateLocalScore() });
+      } else model.records.set(record.review_id || pendingKey, { ...model.records.get(record.review_id || pendingKey), ...record });
     });
     renderRecords();
   });
@@ -376,13 +441,20 @@
     const submitting = Boolean(event.detail.submitting ?? event.detail.running), backgroundRunning = Boolean(event.detail.backgroundRunning);
     document.querySelectorAll('.process-strip span').forEach((item, index) => item.classList.toggle('active', index <= (submitting ? 2 : (backgroundRunning ? 1 : ($('reviewCardFiles').files.length ? 1 : 0)))));
     $('reviewScanButton').querySelector('span').textContent = submitting ? '正在提交…' : (backgroundRunning ? '加入下一批' : '加入批改队列');
-    $('openImport').disabled = submitting;
+    $('openImport').disabled = submitting; renderRecordPicker();
   });
   window.addEventListener('platform:ready', () => { model.ready = true; renderRecords(); loadReviewHistory(); });
-  $('reviewResults').addEventListener('input', event => {
-    if (!event.target.matches('input,select,button.review-verdict-button') || !event.target.closest('.review-controls,.objective-controls')) return;
+  function markReviewDirty(event) {
+    if (!event.target.matches('input,textarea,select,button.review-verdict-button') || !event.target.closest('.review-controls,.objective-controls')) return;
     model.dirty = true; $('reviewSaveStatus').textContent = '修改后自动保存…';
-  });
+    if (model.current) {
+      model.current.grade_confirmed = false;
+      const record = model.records.get(model.current.review_id);
+      if (record) record.grade_confirmed = false;
+      renderRecordPicker();
+    }
+  }
+  ['input', 'change'].forEach(type => $('reviewResults').addEventListener(type, markReviewDirty));
   window.addEventListener('platform:autosave', event => {
     const {status, reviewId, error} = event.detail;
     if (model.current?.review_id !== reviewId) return;

@@ -68,5 +68,5 @@ test('objective review uses the same correct and incorrect buttons',()=>{
 });
 test('saving requires a valid score and button edits enter platform dirty tracking',()=>{
  assert.ok(app.includes("querySelector('.review-manual-score-input:invalid')"));
- const platform=fs.readFileSync(path.join(__dirname,'../platform.js'),'utf8');assert.ok(platform.includes("matches('input,select,button.review-verdict-button')"));
+ const platform=fs.readFileSync(path.join(__dirname,'../platform.js'),'utf8');assert.ok(platform.includes("matches('input,textarea,select,button.review-verdict-button')"));
 });
